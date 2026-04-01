@@ -42,7 +42,7 @@ def parse_convex_type(node: dict) -> ConvexType:
         return ConvexBoolean()
     if t in ("number", "float64"):
         return ConvexFloat64()
-    if t == "int64":
+    if t in ("int64", "bigint"):
         return ConvexInt64()
     if t == "string":
         return ConvexString()

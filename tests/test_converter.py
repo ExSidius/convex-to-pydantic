@@ -55,6 +55,10 @@ class TestParseConvexType:
     def test_int64(self):
         assert isinstance(parse_convex_type({"type": "int64"}), ConvexInt64)
 
+    def test_bigint_canonical_name(self):
+        """Convex canonical JSON uses 'bigint' not 'int64'."""
+        assert isinstance(parse_convex_type({"type": "bigint"}), ConvexInt64)
+
     def test_string(self):
         assert isinstance(parse_convex_type({"type": "string"}), ConvexString)
 
