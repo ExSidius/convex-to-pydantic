@@ -1,0 +1,92 @@
+{
+  "tables": [
+    {
+      "tableName": "chunks",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "documentId": {
+            "fieldType": { "type": "id", "tableName": "documents" },
+            "optional": false
+          },
+          "text": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "embeddingId": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "id", "tableName": "embeddings" },
+                { "type": "null" }
+              ]
+            },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "tableName": "embeddings",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "embedding": {
+            "fieldType": {
+              "type": "array",
+              "value": { "type": "number" }
+            },
+            "optional": false
+          },
+          "chunkId": {
+            "fieldType": { "type": "id", "tableName": "chunks" },
+            "optional": false
+          }
+        }
+      }
+    }
+  ],
+  "functions": [
+    {
+      "module": "chunks",
+      "name": "create",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "documentId": {
+            "fieldType": { "type": "id", "tableName": "documents" },
+            "optional": false
+          },
+          "text": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "embeddings",
+      "name": "search",
+      "type": "action",
+      "args": {
+        "type": "object",
+        "value": {
+          "query": {
+            "fieldType": {
+              "type": "array",
+              "value": { "type": "number" }
+            },
+            "optional": false
+          },
+          "limit": {
+            "fieldType": { "type": "number" },
+            "optional": true
+          }
+        }
+      }
+    }
+  ]
+}

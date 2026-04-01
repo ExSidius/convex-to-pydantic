@@ -1,0 +1,50 @@
+{
+  "tables": [
+    {
+      "tableName": "messages",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "author": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "body": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          }
+        }
+      }
+    }
+  ],
+  "functions": [
+    {
+      "module": "messages",
+      "name": "list",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {}
+      }
+    },
+    {
+      "module": "messages",
+      "name": "send",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "body": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "author": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          }
+        }
+      }
+    }
+  ]
+}

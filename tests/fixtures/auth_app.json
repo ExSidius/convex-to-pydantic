@@ -1,0 +1,201 @@
+{
+  "tables": [
+    {
+      "tableName": "users",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "email": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "emailVerified": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "number" },
+                { "type": "null" }
+              ]
+            },
+            "optional": false
+          },
+          "image": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "name": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          }
+        }
+      }
+    },
+    {
+      "tableName": "sessions",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "sessionToken": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "userId": {
+            "fieldType": { "type": "id", "tableName": "users" },
+            "optional": false
+          },
+          "expires": {
+            "fieldType": { "type": "number" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "tableName": "accounts",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "userId": {
+            "fieldType": { "type": "id", "tableName": "users" },
+            "optional": false
+          },
+          "type": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "literal", "value": "email" },
+                { "type": "literal", "value": "oidc" },
+                { "type": "literal", "value": "oauth" },
+                { "type": "literal", "value": "webauthn" }
+              ]
+            },
+            "optional": false
+          },
+          "provider": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "providerAccountId": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "refreshToken": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "accessToken": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "expiresAt": {
+            "fieldType": { "type": "number" },
+            "optional": true
+          },
+          "tokenType": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "scope": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "idToken": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          },
+          "sessionState": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          }
+        }
+      }
+    },
+    {
+      "tableName": "verificationTokens",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "identifier": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "token": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "expires": {
+            "fieldType": { "type": "number" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "tableName": "authenticators",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "credentialID": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "userId": {
+            "fieldType": { "type": "id", "tableName": "users" },
+            "optional": false
+          },
+          "counter": {
+            "fieldType": { "type": "number" },
+            "optional": false
+          },
+          "credentialBackedUp": {
+            "fieldType": { "type": "boolean" },
+            "optional": false
+          },
+          "transports": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          }
+        }
+      }
+    }
+  ],
+  "functions": [
+    {
+      "module": "auth",
+      "name": "getUser",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {
+          "userId": {
+            "fieldType": { "type": "id", "tableName": "users" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "auth",
+      "name": "createUser",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "email": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "name": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          }
+        }
+      }
+    }
+  ]
+}

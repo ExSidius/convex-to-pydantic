@@ -1,0 +1,155 @@
+{
+  "tables": [
+    {
+      "tableName": "analytics_events",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "eventType": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "literal", "value": "click" },
+                { "type": "literal", "value": "view" },
+                { "type": "literal", "value": "purchase" }
+              ]
+            },
+            "optional": false
+          },
+          "timestamp": {
+            "fieldType": { "type": "int64" },
+            "optional": false
+          },
+          "payload": {
+            "fieldType": { "type": "any" },
+            "optional": false
+          },
+          "tags": {
+            "fieldType": {
+              "type": "record",
+              "keys": { "type": "string" },
+              "values": { "type": "string" }
+            },
+            "optional": false
+          },
+          "attachment": {
+            "fieldType": { "type": "bytes" },
+            "optional": true
+          },
+          "metadata": {
+            "fieldType": {
+              "type": "object",
+              "value": {
+                "source": {
+                  "fieldType": { "type": "string" },
+                  "optional": false
+                },
+                "campaign": {
+                  "fieldType": {
+                    "type": "object",
+                    "value": {
+                      "name": {
+                        "fieldType": { "type": "string" },
+                        "optional": false
+                      },
+                      "budget": {
+                        "fieldType": { "type": "number" },
+                        "optional": true
+                      }
+                    }
+                  },
+                  "optional": true
+                }
+              }
+            },
+            "optional": false
+          },
+          "status": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "literal", "value": true },
+                { "type": "literal", "value": false },
+                { "type": "null" }
+              ]
+            },
+            "optional": false
+          },
+          "priority": {
+            "fieldType": { "type": "literal", "value": 1 },
+            "optional": false
+          },
+          "nestedArrays": {
+            "fieldType": {
+              "type": "array",
+              "value": {
+                "type": "array",
+                "value": { "type": "number" }
+              }
+            },
+            "optional": true
+          }
+        }
+      }
+    }
+  ],
+  "functions": [
+    {
+      "module": "analytics",
+      "name": "track",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "eventType": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "properties": {
+            "fieldType": {
+              "type": "record",
+              "keys": { "type": "string" },
+              "values": { "type": "any" }
+            },
+            "optional": true
+          },
+          "count": {
+            "fieldType": { "type": "int64" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "analytics",
+      "name": "getByType",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {
+          "eventType": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "literal", "value": "click" },
+                { "type": "literal", "value": "view" },
+                { "type": "literal", "value": "purchase" }
+              ]
+            },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "analytics",
+      "name": "export",
+      "type": "action",
+      "args": {
+        "type": "object",
+        "value": {}
+      }
+    }
+  ]
+}
