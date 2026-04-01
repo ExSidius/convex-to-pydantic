@@ -2,6 +2,12 @@
 
 Generate fully-typed Pydantic models and async client wrappers from your [Convex](https://convex.dev) schema — automatically, with zero manual wiring.
 
+```
+convex-to-pydantic generate --convex-dir ./convex --output-dir ./src/myapp/convex_generated
+```
+
+Your IDE immediately gets autocomplete, type checking, and inline docs for every Convex function.
+
 ## Requirements
 
 - **Python >= 3.11**
@@ -19,30 +25,49 @@ pip install convex-to-pydantic
 
 ## Quick start
 
-```bash
-# One-shot generation
-convex-to-pydantic generate \
-  --convex-dir ./convex \
-  --output-dir ./src/myapp/convex_generated
+### 1. Generate types
 
-# Watch mode — regenerates on schema changes
-convex-to-pydantic watch \
+```bash
+convex-to-pydantic generate \
   --convex-dir ./convex \
   --output-dir ./src/myapp/convex_generated
 ```
 
-This produces two files:
+This produces two files in `./src/myapp/convex_generated/`:
 
 | File | Contents |
 |------|----------|
 | `_types.py` | Pydantic `BaseModel` classes for every table and function argument, plus keyword-arg constructor functions |
 | `_client.py` | Async wrapper functions that validate args and call `ConvexClient` methods |
 
-## What you get
+### 2. Use in your code
+
+```python
+from myapp.convex_generated._types import messages_send_mutation
+from myapp.convex_generated._client import messages_send_mutation_call
+
+# Option 1: Just validate args (e.g. for tests)
+args = messages_send_mutation(body="Hello!", author="Alice")
+
+# Option 2: Full async call with validation
+result = await messages_send_mutation_call(client, body="Hello!", author="Alice")
+```
+
+### 3. Watch mode (for development)
+
+```bash
+convex-to-pydantic watch \
+  --convex-dir ./convex \
+  --output-dir ./src/myapp/convex_generated
+```
+
+Run this alongside `npx convex dev`. When your Convex schema changes, types regenerate automatically. See [Watch mode](#watch-mode) for details on how this stays efficient.
+
+## What gets generated
 
 Given a Convex schema with a `messages` table and `messages:send` mutation:
 
-### `_types.py`
+**`_types.py`**
 
 ```python
 class MessagesTable(BaseModel):
@@ -62,7 +87,7 @@ def messages_send_mutation(*, body: str, author: str) -> MessagesSendMutationArg
     return MessagesSendMutationArgs(body=body, author=author)
 ```
 
-### `_client.py`
+**`_client.py`**
 
 ```python
 async def messages_send_mutation_call(
@@ -75,21 +100,6 @@ async def messages_send_mutation_call(
     args = messages_send_mutation(body=body, author=author)
     return await client.mutation("messages:send", args.model_dump(by_alias=True, exclude_none=True))
 ```
-
-### Usage in your code
-
-```python
-from myapp.convex_generated._types import messages_send_mutation
-from myapp.convex_generated._client import messages_send_mutation_call
-
-# Option 1: Just validate args (e.g. for tests)
-args = messages_send_mutation(body="Hello!", author="Alice")
-
-# Option 2: Full async call with validation
-result = await messages_send_mutation_call(client, body="Hello!", author="Alice")
-```
-
-Your IDE gives you autocomplete, type checking, and inline documentation for every Convex function — no manual type stubs required.
 
 ## CLI reference
 
@@ -106,7 +116,7 @@ convex-to-pydantic generate [OPTIONS]
 | `--output-dir PATH` | **(required)** Directory to write `_types.py` and `_client.py`. |
 | `--force / -f` | Regenerate even if the schema hasn't changed. |
 
-Either `--convex-dir` or `--input` must be provided. Use `--input` for offline/CI workflows where Node.js extraction has already been done.
+Either `--convex-dir` or `--input` must be provided. Use `--input` for CI workflows or when you've pre-exported the schema JSON.
 
 ### `watch`
 
@@ -119,44 +129,63 @@ convex-to-pydantic watch [OPTIONS]
 | `--convex-dir PATH` | **(required)** Path to your Convex directory. |
 | `--output-dir PATH` | **(required)** Directory to write generated files. |
 
-Watches `*.ts`, `*.js`, `*.mjs`, `*.tsx`, `*.jsx` files recursively. Events are debounced (500ms quiet window) so rapid saves collapse into a single regeneration. A content hash check ensures no work is done unless the schema actually changed.
+## Watch mode
 
-## How it works
+Watch mode is designed to run alongside `npx convex dev` during development. Here's how it handles the realities of a live development environment:
+
+### What happens on a file change
 
 ```
-Node.js (single subprocess, invoked once per run)
-  └─ schema_export.mjs
-       ├─ Reads _generated/api.js → discovers all modules automatically
-       ├─ Calls exportArgs() for each function
-       └─ Emits one JSON blob to stdout
-
-Python pipeline
-  └─ extractor/runner.py  → raw dict
-  └─ converter.py         → IR (typed Pydantic model tree)
-  └─ namer.py             → assigns all class names upfront, collision-free
-  └─ codegen/types_file.py  → _types.py string
-  └─ codegen/client_file.py → _client.py string
-  └─ hasher.py            → SHA-256 content hash for staleness detection
-  └─ write files + ruff format (if available)
+1. Filesystem event (inotify/FSEvents, not polling)
+       │
+2. Debounce: 500ms quiet window
+   (rapid saves collapse into one check)
+       │
+3. Source-file hash check
+   SHA-256 of all .ts/.js/.mjs file contents
+   ┌─ Unchanged? → STOP. No Node.js call.
+   │
+4. Node.js extraction (single subprocess)
+   schema_export.mjs → JSON blob
+       │
+5. Blob hash check
+   SHA-256 of canonical JSON
+   ┌─ Unchanged? → STOP. No codegen.
+   │  (source changed but schema didn't,
+   │   e.g. comment edits, formatting)
+   │
+6. Pure transform: JSON → IR → _types.py + _client.py
+       │
+7. Write files + update .convex_codegen_hash
 ```
 
-### Staleness detection
+### Two-layer staleness detection
 
-The pipeline computes a SHA-256 digest of the canonical extraction JSON and stores it in `.convex_codegen_hash` alongside the generated files. On subsequent runs, if the hash matches, regeneration is skipped entirely. This makes watch mode efficient: filesystem events fire frequently (editor auto-save, `npx convex dev` writing intermediates), but the expensive extraction + codegen only runs when schema content actually changes.
+The hash file (`.convex_codegen_hash`) stores two lines:
 
-Why a content hash instead of a merkle tree? The extraction output is a single JSON blob, not a tree of independent artifacts. A merkle tree would add complexity without benefit — a flat SHA-256 over the canonical JSON is O(n) in the schema size and more than sufficient.
+1. **Source-file hash** — SHA-256 over all `.ts/.js/.mjs` file contents in the convex directory. Checked *before* calling Node.js. This is the fast path: if you save a file without changing anything (or edit a non-schema file), we never even spawn Node.
+2. **Blob hash** — SHA-256 over the canonical extraction JSON. Checked *after* extraction. Catches cases where source files changed but the schema didn't (comments, formatting, non-schema code).
 
-### Module auto-discovery
+This means:
+- **Editor auto-save** with no changes → stopped at layer 1 (no Node.js)
+- **Editing comments** in a Convex file → stopped at layer 2 (Node.js runs, but no codegen)
+- **Actual schema change** → full regeneration (~200ms for typical projects)
+- **`npx convex dev` writing intermediates** → stopped at layer 1 or 2
 
-Unlike manual approaches that require a hard-coded `CONVEX_MODULES` list, the bundled `schema_export.mjs` walks the API object exported by `_generated/api.js` at runtime. When you add a new Convex function, it's picked up automatically on the next `generate` or `watch` cycle.
+### What watch mode does NOT do
+
+- No polling — uses OS-native filesystem events (inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows)
+- No periodic timers — the debounce timer only runs when a filesystem event actually occurs
+- No file diffing — hashing is cheaper and more reliable than line-by-line comparison
+- No hot reload — it generates static `.py` files. Your IDE/type checker picks up the changes via its own file watcher.
 
 ## Supported Convex types
 
 | Convex type | Python type | Notes |
 |-------------|-------------|-------|
 | `v.string()` | `str` | |
-| `v.number()` / `v.float64()` | `float` | |
-| `v.int64()` | `int` | Inline `# int64` comment |
+| `v.number()` / `v.float64()` | `float` | JSON wire: `"number"` |
+| `v.int64()` | `int` | JSON wire: `"bigint"`. Inline `# int64` comment |
 | `v.boolean()` | `bool` | |
 | `v.null()` | `None` | |
 | `v.bytes()` | `bytes` | |
@@ -171,6 +200,8 @@ Unlike manual approaches that require a hard-coded `CONVEX_MODULES` list, the bu
 | `v.optional(T)` | `T \| None = None` | Default `None` |
 | `v.union(v.literal("a"), v.literal("b"))` | `StrEnum` subclass | All-string-literal unions → enum |
 
+> **Note on the Convex JSON spec:** Convex does not publish a formal spec for `ValidatorJSON`. The canonical definition lives in [`get-convex/convex-js/src/values/validators.ts`](https://github.com/get-convex/convex-js/blob/main/src/values/validators.ts). Key gotcha: the JSON wire format uses `"number"` (not `"float64"`) and `"bigint"` (not `"int64"`) — legacy naming from the server. This tool handles both forms.
+
 ### System fields
 
 All table models automatically include:
@@ -184,28 +215,44 @@ These are excluded from table constructor functions (since Convex manages them).
 
 ```
 src/convex_to_pydantic/
-├── __init__.py                     # Public API: generate(), generate_from_json()
-├── types.py                        # Convex type IR — Pydantic discriminated unions
-├── converter.py                    # Raw JSON dict → IR
-├── namer.py                        # Collision-free PascalCase class naming
-├── hasher.py                       # SHA-256 content-hash staleness detection
+├── __init__.py           # Public API: generate(), generate_from_json()
+├── pipeline.py           # Pure core: transform(blob) → GeneratedFiles
+├── types.py              # Frozen Pydantic IR (immutable discriminated unions)
+├── converter.py          # Raw JSON dict → IR (pure)
+├── namer.py              # Collision-free naming → NameRegistry (pure)
+├── hasher.py             # SHA-256 staleness detection
 ├── codegen/
-│   ├── types_file.py               # IR → _types.py (models + constructors)
-│   └── client_file.py              # IR → _client.py (async client wrappers)
+│   ├── types_file.py     # IR + NameRegistry → _types.py string (pure)
+│   └── client_file.py    # IR + NameRegistry → _client.py string (pure)
 ├── extractor/
-│   ├── runner.py                   # Node.js subprocess wrapper + pre-flight check
-│   └── schema_export.mjs           # Bundled JS: auto-discovers via _generated/api.js
-├── watcher.py                      # Debounced watchdog file monitor
-└── cli.py                          # Typer CLI: generate + watch
+│   ├── runner.py          # Node.js subprocess wrapper (IO edge)
+│   └── schema_export.mjs  # Bundled JS: auto-discovers via _generated/api.js
+├── watcher.py             # Debounced watchdog file monitor (IO edge)
+└── cli.py                 # Typer CLI (IO edge)
 ```
 
-### Design decisions
+### Pure functional core
 
-- **Single Node.js call** — not per-file. The extractor runs once and returns everything as one JSON blob. This is both faster and more reliable than spawning N subprocesses.
-- **Names assigned upfront** — the `Namer` class walks the entire IR and assigns collision-free PascalCase names in a single pass *before* codegen. No post-hoc regex renaming.
-- **Topological sort** — nested `BaseModel` classes are emitted leaf-first so forward references aren't needed (though `from __future__ import annotations` is included as a safety net).
-- **`model_config = ConfigDict(extra="forbid", populate_by_name=True)`** — strict validation by default. Typos in field names are caught at construction time, not silently ignored.
-- **Content-hash skip** — avoids unnecessary file writes, which means downstream tools (file watchers, type checkers, build systems) aren't triggered spuriously.
+The entire transformation pipeline is a single pure function:
+
+```python
+from convex_to_pydantic.pipeline import transform
+
+result = transform(blob)  # dict → GeneratedFiles (frozen dataclass)
+result.types_content      # str — the _types.py file
+result.client_content     # str — the _client.py file
+```
+
+No IO, no mutation, no side effects. The IR models are frozen (immutable), the namer returns a `NameRegistry` instead of mutating, and codegen produces strings. All side effects (file reads, subprocess calls, file writes) live exclusively at the edges: `cli.py`, `__init__.py`, and `runner.py`.
+
+This means:
+- **Testing is trivial** — pass a dict, assert on strings. No mocking.
+- **Deterministic** — same input always produces identical output.
+- **Debuggable** — inspect the IR and NameRegistry at any point without worrying about mutation order.
+
+### Module auto-discovery
+
+The bundled `schema_export.mjs` walks the API object exported by `_generated/api.js` at runtime. No hard-coded `CONVEX_MODULES` list — when you add a new Convex function, it's picked up automatically.
 
 ## Programmatic API
 
@@ -226,6 +273,19 @@ generate_from_json(
 )
 ```
 
+For lower-level access to the pure pipeline:
+
+```python
+import json
+from convex_to_pydantic.pipeline import transform
+
+blob = json.loads(Path("schema.json").read_text())
+result = transform(blob)
+print(result.types_content)   # the _types.py source
+print(result.client_content)  # the _client.py source
+print(result.num_tables, result.num_functions)
+```
+
 ## Development
 
 ```bash
@@ -234,7 +294,7 @@ git clone https://github.com/ExSidius/convex-to-pydantic.git
 cd convex-to-pydantic
 uv sync
 
-# Run tests
+# Run tests (113 tests, ~0.3s)
 uv run pytest
 
 # Lint + format
@@ -244,6 +304,17 @@ uv run ruff format .
 # Type check
 uv run pyright
 ```
+
+### Test fixtures
+
+Tests use four JSON fixtures covering all type variants:
+
+| Fixture | Covers |
+|---------|--------|
+| `chat_app.json` | Basic strings, empty args, simple mutations/queries |
+| `auth_app.json` | `v.id()`, `v.optional()`, `v.union()` with null, string-literal unions (→ StrEnum) |
+| `ai_app.json` | `v.array()`, nullable ID pattern |
+| `kitchen_sink.json` | `v.int64()`, `v.record()`, `v.bytes()`, nested objects (2 levels), non-string literals, mixed literal+null union, nested arrays, empty args, actions |
 
 ## License
 
