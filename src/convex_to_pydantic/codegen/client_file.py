@@ -1,13 +1,16 @@
-"""Generate _client.py from the IR — async client wrappers around ConvexClient."""
+"""Generate _client.py from the IR — async client wrappers around ConvexClient.
+
+Pure module — takes immutable IR + NameRegistry, returns a string.
+No IO, no side effects.
+"""
 
 from __future__ import annotations
 
 import re
 
-from ..codegen.types_file import _render_type, _collect_str_enums, _field_comment
-from ..namer import to_snake
-from ..types import ConvexExport, ConvexType, ConvexObject, ConvexArray, ConvexUnion, ConvexRecord
-
+from ..namer import NameRegistry, to_snake
+from ..types import ConvexExport
+from .types_file import _collect_str_enums, _field_comment, _render_type
 
 _METHOD_MAP = {
     "query": "query",
@@ -16,9 +19,9 @@ _METHOD_MAP = {
 }
 
 
-def generate_client_file(export: ConvexExport) -> str:
-    """Generate the full _client.py file content."""
-    enums = _collect_str_enums(export)
+def generate_client_file(export: ConvexExport, names: NameRegistry) -> str:
+    """Generate the full _client.py file content. Pure function."""
+    enums = _collect_str_enums(export, names)
     sections: list[str] = []
 
     # Header
@@ -33,15 +36,14 @@ def generate_client_file(export: ConvexExport) -> str:
     sections.append("    from convex import ConvexClient")
     sections.append("")
 
-    # Collect imports from _types — class names, fn names, and any referenced types
+    # Collect imports from _types
     type_imports: set[str] = set()
     for fn in export.functions:
-        type_imports.add(fn.class_name)
-        type_imports.add(fn.fn_name)
-        # Collect type names used in rendered signatures
+        fn_names = names.function_names(fn)
+        type_imports.add(fn_names.class_name)
+        type_imports.add(fn_names.fn_name)
         for field in fn.args.fields:
-            rendered = _render_type(field.field_type, fn.class_name, field.name, enums)
-            # Extract identifiers that look like class names (PascalCase, not builtin)
+            rendered = _render_type(field.field_type, names, fn_names.class_name, field.name, enums)
             for token in re.findall(r"\b[A-Z][A-Za-z0-9]+\b", rendered):
                 if token not in ("Any", "None", "Literal", "Field", "BaseModel", "ConfigDict"):
                     type_imports.add(token)
@@ -50,12 +52,13 @@ def generate_client_file(export: ConvexExport) -> str:
         sections.append(f"from ._types import {', '.join(sorted(type_imports))}")
         sections.append("")
 
-    # Generate wrapper functions
+    # Wrapper functions
     for fn in export.functions:
+        fn_names = names.function_names(fn)
         method = _METHOD_MAP.get(fn.fn_type, "query")
         path = f"{fn.module}:{fn.name}"
 
-        lines = [f"async def {fn.fn_name}_call("]
+        lines = [f"async def {fn_names.fn_name}_call("]
         lines.append('    client: "ConvexClient",')
 
         if fn.args.fields:
@@ -64,7 +67,7 @@ def generate_client_file(export: ConvexExport) -> str:
             optional = [f for f in fn.args.fields if f.optional]
             for field in required + optional:
                 py_name = to_snake(field.name)
-                type_str = _render_type(field.field_type, fn.class_name, field.name, enums)
+                type_str = _render_type(field.field_type, names, fn_names.class_name, field.name, enums)
                 comment = _field_comment(field.field_type)
                 if field.optional:
                     type_str = f"{type_str} | None"
@@ -79,11 +82,13 @@ def generate_client_file(export: ConvexExport) -> str:
             arg_names = ", ".join(
                 f"{to_snake(f.name)}={to_snake(f.name)}" for f in fn.args.fields
             )
-            lines.append(f"    args = {fn.fn_name}({arg_names})")
+            lines.append(f"    args = {fn_names.fn_name}({arg_names})")
         else:
-            lines.append(f"    args = {fn.fn_name}()")
+            lines.append(f"    args = {fn_names.fn_name}()")
 
-        lines.append(f'    return await client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))')
+        lines.append(
+            f'    return await client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
+        )
 
         sections.append("\n".join(lines))
         sections.append("")

@@ -18,7 +18,6 @@ from convex_to_pydantic.types import (
     ConvexArray,
     ConvexBoolean,
     ConvexBytes,
-    ConvexField,
     ConvexFloat64,
     ConvexId,
     ConvexInt64,
@@ -141,6 +140,11 @@ class TestParseConvexType:
         with pytest.raises(ValueError, match="Unknown Convex type"):
             parse_convex_type({"type": "unknown_type"})
 
+    def test_results_are_immutable(self):
+        result = parse_convex_type({"type": "string"})
+        with pytest.raises(Exception):
+            result.type = "int64"
+
 
 # ---------------------------------------------------------------------------
 # Table parsing
@@ -172,6 +176,15 @@ class TestParseTable:
         result = parse_table(table)
         assert isinstance(result.document_type.fields[0].field_type, ConvexString)
         assert isinstance(result.document_type.fields[1].field_type, ConvexFloat64)
+
+    def test_result_is_immutable(self):
+        table = {
+            "tableName": "t",
+            "documentType": {"type": "object", "value": {}},
+        }
+        result = parse_table(table)
+        with pytest.raises(Exception):
+            result.table_name = "other"
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +245,6 @@ class TestParseExport:
         export = parse_export(blob)
         assert len(export.tables) == 5
         assert len(export.functions) == 2
-        # Check accounts table has the union type
         accounts = next(t for t in export.tables if t.table_name == "accounts")
         type_field = next(f for f in accounts.document_type.fields if f.name == "type")
         assert isinstance(type_field.field_type, ConvexUnion)
@@ -241,7 +253,6 @@ class TestParseExport:
         blob = json.loads((FIXTURES / "ai_app.json").read_text())
         export = parse_export(blob)
         assert len(export.tables) == 2
-        # Check embeddings table has array type
         embeddings = next(t for t in export.tables if t.table_name == "embeddings")
         emb_field = next(f for f in embeddings.document_type.fields if f.name == "embedding")
         assert isinstance(emb_field.field_type, ConvexArray)
@@ -251,7 +262,6 @@ class TestParseExport:
         export = parse_export(blob)
         assert len(export.tables) == 1
         assert len(export.functions) == 3
-        # Check complex types
         table = export.tables[0]
         fields_by_name = {f.name: f for f in table.document_type.fields}
         assert isinstance(fields_by_name["timestamp"].field_type, ConvexInt64)
@@ -260,3 +270,9 @@ class TestParseExport:
         assert isinstance(fields_by_name["metadata"].field_type, ConvexObject)
         assert isinstance(fields_by_name["nestedArrays"].field_type, ConvexArray)
         assert fields_by_name["attachment"].optional is True
+
+    def test_export_is_immutable(self):
+        blob = json.loads((FIXTURES / "chat_app.json").read_text())
+        export = parse_export(blob)
+        with pytest.raises(Exception):
+            export.tables = ()

@@ -1,4 +1,11 @@
-"""CLI entry point for convex-to-pydantic."""
+"""CLI entry point — the thin IO shell.
+
+All business logic lives in pipeline.py (pure). This module only handles:
+- Argument parsing (typer)
+- File IO (read JSON, write generated files)
+- Subprocess calls (ruff formatting)
+- Console output
+"""
 
 from __future__ import annotations
 
@@ -9,18 +16,40 @@ from typing import Annotated, Optional
 
 import typer
 
-from .codegen.client_file import generate_client_file
-from .codegen.types_file import generate_types_file
-from .converter import parse_export
 from .extractor.runner import extract, extract_from_json
-from .hasher import content_hash, read_hash, write_hash
-from .namer import assign_names
+from .hasher import (
+    blob_hash,
+    collect_source_files,
+    files_hash,
+    read_stored_hashes,
+    write_stored_hashes,
+)
+from .pipeline import GeneratedFiles, transform
 
 app = typer.Typer(
     name="convex-to-pydantic",
     help="Pydantic codegen from Convex schemas.",
     no_args_is_help=True,
 )
+
+
+def _write_generated(output_dir: Path, generated: GeneratedFiles) -> None:
+    """Write generated files and optionally format with ruff."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    types_path = output_dir / "_types.py"
+    client_path = output_dir / "_client.py"
+
+    types_path.write_text(generated.types_content)
+    client_path.write_text(generated.client_content)
+
+    ruff = shutil.which("ruff")
+    if ruff:
+        subprocess.run(
+            [ruff, "format", str(types_path), str(client_path)],
+            capture_output=True,
+            check=False,
+        )
 
 
 def _run_pipeline(
@@ -32,9 +61,19 @@ def _run_pipeline(
 ) -> bool:
     """Run the full extraction → codegen pipeline.
 
-    Returns True if files were regenerated, False if skipped (unchanged).
+    Returns True if files were regenerated, False if skipped.
     """
-    # Step 1: Extract
+    stored_source, stored_blob = read_stored_hashes(output_dir)
+
+    # Pre-flight: check source files hash to avoid Node.js call
+    source_digest: str | None = None
+    if convex_dir and not force:
+        source_files = collect_source_files(convex_dir)
+        source_digest = files_hash(source_files)
+        if source_digest == stored_source:
+            return False
+
+    # Extract
     if input_json:
         blob = extract_from_json(input_json)
     elif convex_dir:
@@ -42,47 +81,29 @@ def _run_pipeline(
     else:
         raise typer.BadParameter("Either --convex-dir or --input must be provided.")
 
-    # Step 2: Check staleness — skip if content hash is unchanged
-    new_hash = content_hash(blob)
-    if not force and read_hash(output_dir) == new_hash:
+    # Check blob hash
+    new_blob_hash = blob_hash(blob)
+    if not force and new_blob_hash == stored_blob:
+        # Source files changed but extraction result is the same (e.g. comments only)
+        if source_digest:
+            write_stored_hashes(output_dir, source_digest, new_blob_hash)
         return False
 
-    # Step 3: Convert to IR
-    export = parse_export(blob)
+    # Pure transform
+    generated = transform(blob)
 
-    # Step 4: Assign names
-    assign_names(export)
+    # Write files (IO)
+    _write_generated(output_dir, generated)
 
-    # Step 5: Generate files
-    types_content = generate_types_file(export)
-    client_content = generate_client_file(export)
+    # Update hashes
+    if source_digest is None and convex_dir:
+        source_files = collect_source_files(convex_dir)
+        source_digest = files_hash(source_files)
+    write_stored_hashes(output_dir, source_digest or "", new_blob_hash)
 
-    # Step 6: Write files
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    types_path = output_dir / "_types.py"
-    client_path = output_dir / "_client.py"
-
-    types_path.write_text(types_content)
-    client_path.write_text(client_content)
-
-    # Step 7: Write content hash
-    write_hash(output_dir, new_hash)
-
-    # Step 8: Format with ruff if available
-    ruff = shutil.which("ruff")
-    if ruff:
-        subprocess.run(
-            [ruff, "format", str(types_path), str(client_path)],
-            capture_output=True,
-            check=False,
-        )
-
-    typer.echo(f"Generated {types_path}")
-    typer.echo(f"Generated {client_path}")
-    typer.echo(
-        f"  {len(export.tables)} table(s), {len(export.functions)} function(s)"
-    )
+    typer.echo(f"Generated {output_dir / '_types.py'}")
+    typer.echo(f"Generated {output_dir / '_client.py'}")
+    typer.echo(f"  {generated.num_tables} table(s), {generated.num_functions} function(s)")
     return True
 
 
@@ -147,8 +168,6 @@ def watch(
     from .watcher import watch as do_watch
 
     typer.echo(f"Watching {convex_dir} for changes...")
-
-    # Run once immediately (force first run)
     _run_pipeline(convex_dir, None, output_dir, force=True)
 
     def on_change() -> None:

@@ -1,24 +1,24 @@
-"""Tests for codegen — _types.py and _client.py generation."""
+"""Tests for codegen — _types.py and _client.py generation.
+
+All tests go through the pure pipeline: blob → transform → strings.
+No IO involved.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from convex_to_pydantic.codegen.client_file import generate_client_file
-from convex_to_pydantic.codegen.types_file import generate_types_file
-from convex_to_pydantic.converter import parse_export
-from convex_to_pydantic.namer import assign_names
+from convex_to_pydantic.pipeline import transform
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _generate(fixture_name: str) -> tuple[str, str]:
-    """Helper: load fixture, parse, name, generate both files."""
+    """Helper: load fixture, run pure pipeline, return (types, client)."""
     blob = json.loads((FIXTURES / fixture_name).read_text())
-    export = parse_export(blob)
-    assign_names(export)
-    return generate_types_file(export), generate_client_file(export)
+    result = transform(blob)
+    return result.types_content, result.client_content
 
 
 # ---------------------------------------------------------------------------
@@ -69,12 +69,10 @@ class TestAuthApp:
 
     def test_nullable_field(self):
         types, _ = _generate("auth_app.json")
-        # emailVerified is union(number, null) → float | None
         assert "email_verified: float | None" in types
 
     def test_optional_field(self):
         types, _ = _generate("auth_app.json")
-        # image is optional(string) → str | None = None
         assert "image: str | None = None" in types
 
     def test_id_type_comment(self):
@@ -83,8 +81,6 @@ class TestAuthApp:
 
     def test_str_enum_generated(self):
         types, _ = _generate("auth_app.json")
-        # accounts.type is union of string literals → StrEnum
-        assert "class " in types
         assert "StrEnum" in types
         assert 'EMAIL = "email"' in types
         assert 'OIDC = "oidc"' in types
@@ -109,7 +105,6 @@ class TestAiApp:
 
     def test_nullable_id(self):
         types, _ = _generate("ai_app.json")
-        # embeddingId is union(id("embeddings"), null) → str | None
         assert "embedding_id: str | None" in types
 
     def test_action_client_wrapper(self):
@@ -158,7 +153,6 @@ class TestKitchenSink:
 
     def test_mixed_literal_null_union(self):
         types, _ = _generate("kitchen_sink.json")
-        # status is union(literal(true), literal(false), null) → Literal[True] | Literal[False] | None
         assert "Literal[True] | Literal[False] | None" in types
 
     def test_single_literal(self):
@@ -186,17 +180,14 @@ class TestKitchenSink:
         assert 'client.action("analytics:export"' in client
 
     def test_types_file_is_valid_python(self):
-        """The generated _types.py should be valid Python."""
         types, _ = _generate("kitchen_sink.json")
         compile(types, "_types.py", "exec")
 
     def test_client_file_is_valid_python(self):
-        """The generated _client.py should be valid Python."""
         _, client = _generate("kitchen_sink.json")
         compile(client, "_client.py", "exec")
 
     def test_types_file_executes(self):
-        """The generated _types.py should execute without import errors."""
         types, _ = _generate("kitchen_sink.json")
         exec(compile(types, "_types.py", "exec"), {"__name__": "__test__"})
 
@@ -217,3 +208,12 @@ class TestAllFixturesValid:
         for fixture in FIXTURES.glob("*.json"):
             types, _ = _generate(fixture.name)
             exec(compile(types, f"{fixture.stem}/_types.py", "exec"), {"__name__": "__test__"})
+
+    def test_transform_is_deterministic(self):
+        """Same input always produces identical output."""
+        for fixture in FIXTURES.glob("*.json"):
+            blob = json.loads(fixture.read_text())
+            r1 = transform(blob)
+            r2 = transform(blob)
+            assert r1.types_content == r2.types_content
+            assert r1.client_content == r2.client_content

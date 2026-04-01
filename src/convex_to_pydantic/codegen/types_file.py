@@ -1,10 +1,12 @@
-"""Generate _types.py from the IR — Pydantic models + constructor functions."""
+"""Generate _types.py from the IR — Pydantic models + constructor functions.
+
+Pure module — takes immutable IR + NameRegistry, returns a string.
+No IO, no side effects.
+"""
 
 from __future__ import annotations
 
-from collections import defaultdict
-
-from ..namer import to_snake
+from ..namer import NameRegistry, to_pascal, to_snake
 from ..types import (
     ConvexAny,
     ConvexArray,
@@ -31,7 +33,6 @@ from ..types import (
 
 
 def _is_all_string_literal_union(t: ConvexType) -> bool:
-    """Check if a type is a union of all string literals."""
     if not isinstance(t, ConvexUnion):
         return False
     if len(t.variants) < 2:
@@ -39,18 +40,20 @@ def _is_all_string_literal_union(t: ConvexType) -> bool:
     return all(isinstance(v, ConvexLiteral) and isinstance(v.value, str) for v in t.variants)
 
 
-def _collect_str_enums(export: ConvexExport) -> dict[str, list[str]]:
-    """Collect all all-string-literal unions and their values, keyed by class_name.
+def _collect_str_enums(
+    export: ConvexExport, names: NameRegistry
+) -> dict[str, list[str]]:
+    """Collect all all-string-literal unions, keyed by derived enum name.
 
-    Returns a dict mapping enum class name -> list of string values.
-    We derive the enum name from the parent object's class_name + field name.
+    Returns enum class name → list of string values.
     """
     enums: dict[str, list[str]] = {}
     seen_value_sets: dict[tuple[str, ...], str] = {}
 
     def _walk_object(obj: ConvexObject) -> None:
+        parent = names.object_name(obj)
         for field in obj.fields:
-            _walk_field(obj.class_name, field.name, field.field_type)
+            _walk_field(parent, field.name, field.field_type)
 
     def _walk_field(parent_name: str, field_name: str, t: ConvexType) -> None:
         if _is_all_string_literal_union(t):
@@ -58,7 +61,7 @@ def _collect_str_enums(export: ConvexExport) -> dict[str, list[str]]:
             values = [v.value for v in t.variants if isinstance(v, ConvexLiteral)]
             key = tuple(values)
             if key not in seen_value_sets:
-                enum_name = parent_name + _to_pascal_field(field_name) + "Enum"
+                enum_name = parent_name + to_pascal(field_name) + "Enum"
                 seen_value_sets[key] = enum_name
                 enums[enum_name] = list(values)
         elif isinstance(t, ConvexObject):
@@ -79,20 +82,14 @@ def _collect_str_enums(export: ConvexExport) -> dict[str, list[str]]:
     return enums
 
 
-def _to_pascal_field(s: str) -> str:
-    """Capitalize the first letter of a field name for enum naming."""
-    from ..namer import to_pascal
-
-    return to_pascal(s)
-
-
 # ---------------------------------------------------------------------------
 # Type annotation rendering
 # ---------------------------------------------------------------------------
 
 
-def _enum_name_for_union(parent_name: str, field_name: str, t: ConvexUnion, enums: dict[str, list[str]]) -> str | None:
-    """If this union maps to a known StrEnum, return its name."""
+def _enum_name_for_union(
+    t: ConvexUnion, enums: dict[str, list[str]]
+) -> str | None:
     values = tuple(v.value for v in t.variants if isinstance(v, ConvexLiteral))
     for name, vals in enums.items():
         if tuple(vals) == values:
@@ -102,6 +99,7 @@ def _enum_name_for_union(parent_name: str, field_name: str, t: ConvexUnion, enum
 
 def _render_type(
     t: ConvexType,
+    names: NameRegistry,
     parent_name: str = "",
     field_name: str = "",
     enums: dict[str, list[str]] | None = None,
@@ -126,25 +124,25 @@ def _render_type(
     if isinstance(t, ConvexLiteral):
         return f"Literal[{t.value!r}]"
     if isinstance(t, ConvexArray):
-        inner = _render_type(t.element, parent_name, field_name + "Item", enums)
+        inner = _render_type(t.element, names, parent_name, field_name + "Item", enums)
         return f"list[{inner}]"
     if isinstance(t, ConvexRecord):
-        k = _render_type(t.keys, parent_name, field_name + "Key", enums)
-        v = _render_type(t.values, parent_name, field_name + "Value", enums)
+        k = _render_type(t.keys, names, parent_name, field_name + "Key", enums)
+        v = _render_type(t.values, names, parent_name, field_name + "Value", enums)
         return f"dict[{k}, {v}]"
     if isinstance(t, ConvexUnion):
-        # Check for StrEnum
         if enums and _is_all_string_literal_union(t):
-            enum_name = _enum_name_for_union(parent_name, field_name, t, enums)
+            enum_name = _enum_name_for_union(t, enums)
             if enum_name:
                 return enum_name
 
-        # Simplify T | null → T | None
-        variants = t.variants
-        non_null = [v for v in variants if not isinstance(v, ConvexNull)]
-        has_null = len(non_null) < len(variants)
-
-        parts = [_render_type(v, parent_name, f"{field_name}Variant{i}", enums) for i, v in enumerate(variants) if not isinstance(v, ConvexNull)]
+        non_null = [v for v in t.variants if not isinstance(v, ConvexNull)]
+        has_null = len(non_null) < len(t.variants)
+        parts = [
+            _render_type(v, names, parent_name, f"{field_name}Variant{i}", enums)
+            for i, v in enumerate(t.variants)
+            if not isinstance(v, ConvexNull)
+        ]
 
         if has_null:
             if len(parts) == 1:
@@ -152,12 +150,11 @@ def _render_type(
             return " | ".join(parts) + " | None"
         return " | ".join(parts)
     if isinstance(t, ConvexObject):
-        return t.class_name
+        return names.object_name(t)
     raise ValueError(f"Unknown type: {t}")
 
 
 def _field_comment(t: ConvexType) -> str:
-    """Return an inline comment for special types."""
     if isinstance(t, ConvexInt64):
         return "  # int64"
     if isinstance(t, ConvexId):
@@ -166,20 +163,21 @@ def _field_comment(t: ConvexType) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Object collection + topological sort
+# Object collection (topological order)
 # ---------------------------------------------------------------------------
 
 
-def _collect_objects(export: ConvexExport) -> list[ConvexObject]:
-    """Collect all ConvexObject nodes in the IR."""
+def _collect_objects(
+    export: ConvexExport,
+) -> list[ConvexObject]:
+    """Collect all ConvexObject nodes in dependency order (leaves first)."""
     objects: list[ConvexObject] = []
-    seen: set[str] = set()
+    seen: set[int] = set()
 
     def _walk(t: ConvexType) -> None:
         if isinstance(t, ConvexObject):
-            if t.class_name and t.class_name not in seen:
-                seen.add(t.class_name)
-                # Walk children first (for dependency ordering)
+            if id(t) not in seen:
+                seen.add(id(t))
                 for f in t.fields:
                     _walk(f.field_type)
                 objects.append(t)
@@ -201,49 +199,52 @@ def _collect_objects(export: ConvexExport) -> list[ConvexObject]:
 
 
 # ---------------------------------------------------------------------------
-# Code generation
+# Code generation (all pure — returns strings)
 # ---------------------------------------------------------------------------
 
 
-def _render_field_line(field: ConvexField, parent_name: str, enums: dict[str, list[str]]) -> str:
-    """Render a single field as a Pydantic model field line."""
+def _render_field_line(
+    field: ConvexField,
+    parent_name: str,
+    names: NameRegistry,
+    enums: dict[str, list[str]],
+) -> str:
     py_name = to_snake(field.name)
-    type_str = _render_type(field.field_type, parent_name, field.name, enums)
+    type_str = _render_type(field.field_type, names, parent_name, field.name, enums)
     comment = _field_comment(field.field_type)
     needs_alias = py_name != field.name
 
     if field.optional:
         type_str = f"{type_str} | None"
 
-    parts: list[str] = []
-
     if field.optional and needs_alias:
-        parts.append(f"    {py_name}: {type_str} = Field(default=None, alias={field.name!r}){comment}")
+        return f"    {py_name}: {type_str} = Field(default=None, alias={field.name!r}){comment}"
     elif field.optional:
-        parts.append(f"    {py_name}: {type_str} = None{comment}")
+        return f"    {py_name}: {type_str} = None{comment}"
     elif needs_alias:
-        parts.append(f"    {py_name}: {type_str} = Field(alias={field.name!r}){comment}")
+        return f"    {py_name}: {type_str} = Field(alias={field.name!r}){comment}"
     else:
-        parts.append(f"    {py_name}: {type_str}{comment}")
-
-    return parts[0]
+        return f"    {py_name}: {type_str}{comment}"
 
 
-def _render_model(obj: ConvexObject, enums: dict[str, list[str]]) -> str:
-    """Render a single Pydantic BaseModel class."""
+def _render_model(
+    obj: ConvexObject,
+    names: NameRegistry,
+    enums: dict[str, list[str]],
+) -> str:
+    class_name = names.object_name(obj)
     lines = [
-        f"class {obj.class_name}(BaseModel):",
+        f"class {class_name}(BaseModel):",
         '    model_config = ConfigDict(extra="forbid", populate_by_name=True)',
     ]
 
     if not obj.fields:
         lines.append("    pass")
     else:
-        # Render required fields first, then optional
         required = [f for f in obj.fields if not f.optional]
         optional = [f for f in obj.fields if f.optional]
         for field in required + optional:
-            lines.append(_render_field_line(field, obj.class_name, enums))
+            lines.append(_render_field_line(field, class_name, names, enums))
 
     return "\n".join(lines)
 
@@ -251,22 +252,22 @@ def _render_model(obj: ConvexObject, enums: dict[str, list[str]]) -> str:
 def _render_constructor(
     fn_name: str,
     class_name: str,
-    obj: ConvexObject,
+    fields: tuple[ConvexField, ...],
     doc: str,
+    names: NameRegistry,
     enums: dict[str, list[str]],
 ) -> str:
-    """Render a keyword-arg constructor function."""
     lines = [f"def {fn_name}("]
 
-    if not obj.fields:
+    if not fields:
         lines[0] += f") -> {class_name}:"
     else:
         lines.append("    *,")
-        required = [f for f in obj.fields if not f.optional]
-        optional = [f for f in obj.fields if f.optional]
+        required = [f for f in fields if not f.optional]
+        optional = [f for f in fields if f.optional]
         for field in required + optional:
             py_name = to_snake(field.name)
-            type_str = _render_type(field.field_type, class_name, field.name, enums)
+            type_str = _render_type(field.field_type, names, class_name, field.name, enums)
             comment = _field_comment(field.field_type)
             if field.optional:
                 type_str = f"{type_str} | None"
@@ -277,17 +278,16 @@ def _render_constructor(
 
     lines.append(f'    """{doc}"""')
 
-    if not obj.fields:
+    if not fields:
         lines.append(f"    return {class_name}()")
     else:
-        args = ", ".join(f"{to_snake(f.name)}={to_snake(f.name)}" for f in obj.fields)
+        args = ", ".join(f"{to_snake(f.name)}={to_snake(f.name)}" for f in fields)
         lines.append(f"    return {class_name}({args})")
 
     return "\n".join(lines)
 
 
 def _render_enum(name: str, values: list[str]) -> str:
-    """Render a StrEnum class."""
     lines = [f"class {name}(StrEnum):"]
     for v in values:
         member = v.upper().replace("-", "_").replace(" ", "_")
@@ -295,9 +295,9 @@ def _render_enum(name: str, values: list[str]) -> str:
     return "\n".join(lines)
 
 
-def generate_types_file(export: ConvexExport) -> str:
-    """Generate the full _types.py file content."""
-    enums = _collect_str_enums(export)
+def generate_types_file(export: ConvexExport, names: NameRegistry) -> str:
+    """Generate the full _types.py file content. Pure function."""
+    enums = _collect_str_enums(export, names)
     objects = _collect_objects(export)
 
     sections: list[str] = []
@@ -309,7 +309,7 @@ def generate_types_file(export: ConvexExport) -> str:
     sections.append("from __future__ import annotations")
     sections.append("")
 
-    # Imports — collect what we need
+    # Collect needed imports
     needs_any = False
     needs_literal = False
 
@@ -325,12 +325,10 @@ def generate_types_file(export: ConvexExport) -> str:
             _check_imports(t.keys)
             _check_imports(t.values)
         elif isinstance(t, ConvexUnion):
-            # Check if it's a StrEnum — if so, don't need Literal for it
             if not _is_all_string_literal_union(t):
                 for v in t.variants:
                     _check_imports(v)
             else:
-                # Still check non-literal variants (shouldn't exist, but safe)
                 for v in t.variants:
                     if isinstance(v, ConvexLiteral) and not isinstance(v.value, str):
                         needs_literal = True
@@ -344,8 +342,6 @@ def generate_types_file(export: ConvexExport) -> str:
         for f in obj.fields:
             _check_imports(f.field_type)
 
-    # Check if we need Literal for non-enum contexts too
-    # (mixed literal unions that aren't all-string won't be enums)
     typing_imports = []
     if needs_any:
         typing_imports.append("Any")
@@ -354,7 +350,6 @@ def generate_types_file(export: ConvexExport) -> str:
 
     if typing_imports:
         sections.append(f"from typing import {', '.join(sorted(typing_imports))}")
-
     if enums:
         sections.append("from enum import StrEnum")
 
@@ -362,7 +357,7 @@ def generate_types_file(export: ConvexExport) -> str:
     sections.append("from pydantic import BaseModel, ConfigDict, Field")
     sections.append("")
 
-    # Section 1: StrEnums
+    # StrEnums
     if enums:
         sections.append("")
         sections.append("# --- Enums ---")
@@ -371,17 +366,16 @@ def generate_types_file(export: ConvexExport) -> str:
             sections.append(_render_enum(name, values))
             sections.append("")
 
-    # Section 2: Models (already in topological order from _collect_objects)
+    # Models
     sections.append("")
     sections.append("# --- Models ---")
     sections.append("")
     for obj in objects:
-        sections.append(_render_model(obj, enums))
+        sections.append(_render_model(obj, names, enums))
         sections.append("")
 
-    # Section 3: Table constructors
+    # Constructors
     has_table_constructors = any(
-        # Non-system fields exist
         any(f.name not in ("_id", "_creationTime") for f in table.document_type.fields)
         for table in export.tables
     )
@@ -393,30 +387,34 @@ def generate_types_file(export: ConvexExport) -> str:
         sections.append("")
 
     for table in export.tables:
-        # Constructor for table — only user fields (not _id, _creationTime)
-        user_fields = [f for f in table.document_type.fields if f.name not in ("_id", "_creationTime")]
+        user_fields = tuple(
+            f for f in table.document_type.fields
+            if f.name not in ("_id", "_creationTime")
+        )
         if user_fields:
-            user_obj = ConvexObject(fields=user_fields, class_name=table.document_type.class_name)
+            table_class = names.object_name(table.document_type)
             fn_name = to_snake(table.table_name) + "_table"
             sections.append(
                 _render_constructor(
                     fn_name,
-                    table.document_type.class_name,
-                    user_obj,
+                    table_class,
+                    user_fields,
                     f"Construct a {table.table_name} document (without system fields).",
+                    names,
                     enums,
                 )
             )
             sections.append("")
 
-    # Section 4: Function constructors
     for fn in export.functions:
+        fn_names = names.function_names(fn)
         sections.append(
             _render_constructor(
-                fn.fn_name,
-                fn.class_name,
-                fn.args,
+                fn_names.fn_name,
+                fn_names.class_name,
+                fn.args.fields,
                 f"Validate args for Convex {fn.fn_type} {fn.module}:{fn.name}.",
+                names,
                 enums,
             )
         )
