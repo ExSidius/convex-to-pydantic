@@ -60,18 +60,23 @@ def _collect_str_enums(
             assert isinstance(t, ConvexUnion)
             values = [v.value for v in t.variants if isinstance(v, ConvexLiteral)]
             key = tuple(values)
-            if key not in seen_value_sets:
-                enum_name = parent_name + to_pascal(field_name) + "Enum"
-                seen_value_sets[key] = enum_name
-                enums[enum_name] = list(values)
-        elif isinstance(t, ConvexObject):
+            if key in seen_value_sets:
+                return
+            enum_name = parent_name + to_pascal(field_name) + "Enum"
+            seen_value_sets[key] = enum_name
+            enums[enum_name] = list(values)
+            return
+        if isinstance(t, ConvexObject):
             _walk_object(t)
-        elif isinstance(t, ConvexArray):
+            return
+        if isinstance(t, ConvexArray):
             _walk_field(parent_name, field_name + "Item", t.element)
-        elif isinstance(t, ConvexUnion):
+            return
+        if isinstance(t, ConvexUnion):
             for i, v in enumerate(t.variants):
                 _walk_field(parent_name, f"{field_name}Variant{i}", v)
-        elif isinstance(t, ConvexRecord):
+            return
+        if isinstance(t, ConvexRecord):
             _walk_field(parent_name, field_name + "Value", t.values)
 
     for table in export.tables:
@@ -175,20 +180,25 @@ def _collect_objects(
     seen: set[int] = set()
 
     def _walk(t: ConvexType) -> None:
-        if isinstance(t, ConvexObject):
-            if id(t) not in seen:
-                seen.add(id(t))
-                for f in t.fields:
-                    _walk(f.field_type)
-                objects.append(t)
-        elif isinstance(t, ConvexArray):
+        if isinstance(t, ConvexArray):
             _walk(t.element)
-        elif isinstance(t, ConvexUnion):
+            return
+        if isinstance(t, ConvexUnion):
             for v in t.variants:
                 _walk(v)
-        elif isinstance(t, ConvexRecord):
+            return
+        if isinstance(t, ConvexRecord):
             _walk(t.keys)
             _walk(t.values)
+            return
+        if not isinstance(t, ConvexObject):
+            return
+        if id(t) in seen:
+            return
+        seen.add(id(t))
+        for f in t.fields:
+            _walk(f.field_type)
+        objects.append(t)
 
     for table in export.tables:
         _walk(table.document_type)

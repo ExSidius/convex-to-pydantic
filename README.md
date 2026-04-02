@@ -23,6 +23,24 @@ uv add convex-to-pydantic
 pip install convex-to-pydantic
 ```
 
+### Install from GitHub (pre-release / testing)
+
+While the package is still in development, you can install directly from GitHub:
+
+```bash
+# Add as a project dependency
+uv add git+https://github.com/ExSidius/convex-to-pydantic.git
+
+# Pin to a specific branch
+uv add git+https://github.com/ExSidius/convex-to-pydantic.git@main
+
+# Install as a CLI tool (globally)
+uv tool install git+https://github.com/ExSidius/convex-to-pydantic.git
+
+# Or with pip
+pip install git+https://github.com/ExSidius/convex-to-pydantic.git
+```
+
 ## Quick start
 
 ### 1. Generate types
@@ -286,6 +304,20 @@ print(result.client_content)  # the _client.py source
 print(result.num_tables, result.num_functions)
 ```
 
+## Code quality guidelines
+
+This project follows a few conventions to keep the codebase clean and predictable:
+
+1. **Pure functional core.** The entire transformation pipeline (`converter.py` → `namer.py` → `codegen/`) is pure — no IO, no mutation, no side effects. All IR models are frozen/immutable. Side effects live exclusively at the edges: `cli.py`, `__init__.py`, `runner.py`.
+
+2. **Guard clauses over nesting.** Functions use early returns to handle edge cases at the top, keeping the main logic at a single indentation level. Avoid deep `if/elif/else` chains.
+
+3. **No blanket exception catching.** Catch specific exception types (`OSError`, `json.JSONDecodeError`, `ValueError`, etc.), never bare `except Exception`.
+
+4. **Focused, typed functions.** Every function has a clear input/output contract. No hidden state, no global mutation. Type annotations on all public APIs.
+
+5. **No speculative abstractions.** Don't add helpers, utilities, or configurability for hypothetical future needs. Three similar lines of code is better than a premature abstraction.
+
 ## Development
 
 ```bash
@@ -304,6 +336,27 @@ uv run ruff format .
 # Type check
 uv run pyright
 ```
+
+### Pre-commit hooks (prek)
+
+This project uses [prek](https://prek.j178.dev/) for pre-commit hooks. To set up:
+
+```bash
+# Install prek
+uv tool install prek
+# or: brew install prek
+
+# Install git hooks
+prek install
+
+# Run hooks manually
+prek run --all-files
+```
+
+Configured hooks (see `prek.toml`):
+- **ruff check** — lint with auto-fix
+- **ruff format** — code formatting
+- **pyright** — type checking
 
 ### Test fixtures
 

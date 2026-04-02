@@ -9,6 +9,7 @@ All business logic lives in pipeline.py (pure). This module only handles:
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -236,7 +237,7 @@ def watch(
         try:
             result = _run_pipeline(convex_dir, None, output_dir)
             _print_result(result, output_dir)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, ValueError, RuntimeError) as e:
             typer.echo(f"  Error: {e}", err=True)
 
     do_watch(convex_dir, on_change)

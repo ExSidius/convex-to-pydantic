@@ -99,20 +99,25 @@ def _walk_and_name_type(
     t: ConvexType,
 ) -> None:
     """Recursively walk a type tree, registering names for ConvexObject nodes."""
-    if isinstance(t, ConvexObject):
-        if id(t) not in registry.objects:
-            name = namer.name_nested_object(parent_name, field_name)
-            registry.objects[id(t)] = name
-            for f in t.fields:
-                _walk_and_name_type(namer, registry, name, f.name, f.field_type)
-    elif isinstance(t, ConvexArray):
+    if isinstance(t, ConvexArray):
         _walk_and_name_type(namer, registry, parent_name, field_name + "Item", t.element)
-    elif isinstance(t, ConvexUnion):
+        return
+    if isinstance(t, ConvexUnion):
         for i, v in enumerate(t.variants):
             _walk_and_name_type(namer, registry, parent_name, f"{field_name}Variant{i}", v)
-    elif isinstance(t, ConvexRecord):
+        return
+    if isinstance(t, ConvexRecord):
         _walk_and_name_type(namer, registry, parent_name, field_name + "Key", t.keys)
         _walk_and_name_type(namer, registry, parent_name, field_name + "Value", t.values)
+        return
+    if not isinstance(t, ConvexObject):
+        return
+    if id(t) in registry.objects:
+        return
+    name = namer.name_nested_object(parent_name, field_name)
+    registry.objects[id(t)] = name
+    for f in t.fields:
+        _walk_and_name_type(namer, registry, name, f.name, f.field_type)
 
 
 def assign_names(export: ConvexExport) -> NameRegistry:
