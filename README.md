@@ -353,10 +353,11 @@ prek install
 prek run --all-files
 ```
 
-Configured hooks (see `prek.toml`):
+Configured hooks (see `.pre-commit-config.yaml`):
 - **ruff check** — lint with auto-fix
 - **ruff format** — code formatting
 - **pyright** — type checking
+- **biome check** — JS/TS linting and formatting
 
 ### Test fixtures
 
