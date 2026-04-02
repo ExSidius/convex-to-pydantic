@@ -334,7 +334,7 @@ uv run ruff check .
 uv run ruff format .
 
 # Type check
-uv run pyright
+uv run ty check
 ```
 
 ### Pre-commit hooks (prek)
@@ -356,7 +356,7 @@ prek run --all-files
 Configured hooks (see `.pre-commit-config.yaml`):
 - **ruff check** — lint with auto-fix
 - **ruff format** — code formatting
-- **pyright** — type checking
+- **ty** — type checking (Astral)
 - **biome check** — JS/TS linting and formatting
 
 ### Test fixtures
