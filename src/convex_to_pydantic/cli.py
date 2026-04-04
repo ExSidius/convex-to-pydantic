@@ -37,6 +37,21 @@ app = typer.Typer(
 )
 
 
+def _ruff_cmd() -> list[str] | None:
+    """Return the command prefix for invoking ruff, or None if unavailable.
+
+    Prefers ``uvx ruff`` (transient install via uv) so users don't need ruff
+    installed globally.  Falls back to a bare ``ruff`` on PATH.
+    """
+    uvx = shutil.which("uvx")
+    if uvx:
+        return [uvx, "ruff"]
+    ruff = shutil.which("ruff")
+    if ruff:
+        return [ruff]
+    return None
+
+
 @dataclass(frozen=True)
 class PipelineResult:
     """What happened during a pipeline run — for status reporting."""
@@ -65,10 +80,10 @@ def _write_generated(
             file_path.write_text(content)
             written_paths.append(str(file_path))
         if do_format and written_paths:
-            ruff = shutil.which("ruff")
+            ruff = _ruff_cmd()
             if ruff:
                 subprocess.run(
-                    [ruff, "format", *written_paths],
+                    [*ruff, "format", *written_paths],
                     capture_output=True,
                     check=False,
                 )
@@ -81,10 +96,10 @@ def _write_generated(
         client_path.write_text(generated.client_content)
 
         if do_format:
-            ruff = shutil.which("ruff")
+            ruff = _ruff_cmd()
             if ruff:
                 subprocess.run(
-                    [ruff, "format", str(types_path), str(client_path)],
+                    [*ruff, "format", str(types_path), str(client_path)],
                     capture_output=True,
                     check=False,
                 )
@@ -170,12 +185,12 @@ def _run_pipeline(
 
 
 def _format_string(content: str) -> str:
-    """Format Python source code via ruff, falling back to identity."""
-    ruff = shutil.which("ruff")
+    """Format Python source code via ruff (preferring ``uvx ruff``), falling back to identity."""
+    ruff = _ruff_cmd()
     if not ruff:
         return content
     result = subprocess.run(
-        [ruff, "format", "--stdin-filename=_.py", "-"],
+        [*ruff, "format", "--stdin-filename=_.py", "-"],
         input=content,
         capture_output=True,
         text=True,
