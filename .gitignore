@@ -1,3 +1,6 @@
+# Auto-generated version file (hatch-vcs)
+src/convex_to_pydantic/_version.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -1,6 +1,6 @@
 [project]
 name = "convex-to-pydantic"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Pydantic codegen from Convex schemas. Requires Node.js ≥18 on PATH."
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,8 +15,14 @@ dependencies = [
 convex-to-pydantic = "convex_to_pydantic.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/convex_to_pydantic/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/convex_to_pydantic"]
