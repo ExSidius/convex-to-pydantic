@@ -35,5 +35,5 @@ testpaths = ["tests"]
 line-length = 100
 target-version = "py311"
 
-[tool.ty]
+[tool.ty.environment]
 python-version = "3.11"

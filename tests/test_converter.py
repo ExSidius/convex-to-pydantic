@@ -94,40 +94,48 @@ class TestParseConvexType:
         assert isinstance(result.element, ConvexString)
 
     def test_nested_array(self):
-        result = parse_convex_type({
-            "type": "array",
-            "value": {"type": "array", "value": {"type": "number"}},
-        })
+        result = parse_convex_type(
+            {
+                "type": "array",
+                "value": {"type": "array", "value": {"type": "number"}},
+            }
+        )
         assert isinstance(result, ConvexArray)
         assert isinstance(result.element, ConvexArray)
         assert isinstance(result.element.element, ConvexFloat64)
 
     def test_record(self):
-        result = parse_convex_type({
-            "type": "record",
-            "keys": {"type": "string"},
-            "values": {"type": "any"},
-        })
+        result = parse_convex_type(
+            {
+                "type": "record",
+                "keys": {"type": "string"},
+                "values": {"type": "any"},
+            }
+        )
         assert isinstance(result, ConvexRecord)
         assert isinstance(result.keys, ConvexString)
         assert isinstance(result.values, ConvexAny)
 
     def test_union(self):
-        result = parse_convex_type({
-            "type": "union",
-            "value": [{"type": "string"}, {"type": "null"}],
-        })
+        result = parse_convex_type(
+            {
+                "type": "union",
+                "value": [{"type": "string"}, {"type": "null"}],
+            }
+        )
         assert isinstance(result, ConvexUnion)
         assert len(result.variants) == 2
 
     def test_object(self):
-        result = parse_convex_type({
-            "type": "object",
-            "value": {
-                "name": {"fieldType": {"type": "string"}, "optional": False},
-                "age": {"fieldType": {"type": "number"}, "optional": True},
-            },
-        })
+        result = parse_convex_type(
+            {
+                "type": "object",
+                "value": {
+                    "name": {"fieldType": {"type": "string"}, "optional": False},
+                    "age": {"fieldType": {"type": "number"}, "optional": True},
+                },
+            }
+        )
         assert isinstance(result, ConvexObject)
         assert len(result.fields) == 2
         assert result.fields[0].name == "name"

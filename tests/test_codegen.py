@@ -52,6 +52,17 @@ class TestChatApp:
         types, _ = _generate("chat_app.json")
         assert "def messages_list_query() -> MessagesListQueryArgs:" in types
 
+    def test_table_model_before_constructor(self):
+        """Table model and its constructor should be grouped together."""
+        types, _ = _generate("chat_app.json")
+        assert types.index("class MessagesTable(") < types.index("def messages_table(")
+
+    def test_section_comments(self):
+        types, _ = _generate("chat_app.json")
+        assert "# --- Table: messages ---" in types
+        assert "# --- Function: messages:list (query) ---" in types
+        assert "# --- Function: messages:send (mutation) ---" in types
+
 
 # ---------------------------------------------------------------------------
 # Auth app (optional fields, id types, string literal unions)
@@ -151,6 +162,15 @@ class TestKitchenSink:
         types, _ = _generate("kitchen_sink.json")
         assert "metadata: AnalyticsEventsTableMetadata" in types
 
+    def test_nested_models_grouped_with_table(self):
+        """Nested objects appear before their parent table, in the same group."""
+        types, _ = _generate("kitchen_sink.json")
+        campaign_pos = types.index("class AnalyticsEventsTableMetadataCampaign(")
+        metadata_pos = types.index("class AnalyticsEventsTableMetadata(")
+        table_pos = types.index("class AnalyticsEventsTable(")
+        constructor_pos = types.index("def analytics_events_table(")
+        assert campaign_pos < metadata_pos < table_pos < constructor_pos
+
     def test_mixed_literal_null_union(self):
         types, _ = _generate("kitchen_sink.json")
         assert "Literal[True] | Literal[False] | None" in types
@@ -190,6 +210,48 @@ class TestKitchenSink:
     def test_types_file_executes(self):
         types, _ = _generate("kitchen_sink.json")
         exec(compile(types, "_types.py", "exec"), {"__name__": "__test__"})
+
+
+# ---------------------------------------------------------------------------
+# Nested modules (subdirectory handling)
+# ---------------------------------------------------------------------------
+
+
+class TestNestedModules:
+    def test_chat_messages_function_names(self):
+        types, _ = _generate("nested_modules.json")
+        assert "def chat_messages_list_query(" in types
+        assert "def chat_messages_send_mutation(" in types
+
+    def test_api_messages_function_names(self):
+        types, _ = _generate("nested_modules.json")
+        assert "def api_messages_list_query(" in types
+        assert "def api_messages_delete_mutation(" in types
+
+    def test_deep_nested_module(self):
+        types, _ = _generate("nested_modules.json")
+        assert "def admin_chat_moderate_ban_mutation(" in types
+
+    def test_client_paths_preserve_slashes(self):
+        _, client = _generate("nested_modules.json")
+        assert 'client.query("chat/messages:list"' in client
+        assert 'client.mutation("chat/messages:send"' in client
+        assert 'client.query("api/messages:list"' in client
+        assert 'client.mutation("api/messages:delete"' in client
+        assert 'client.mutation("admin/chat/moderate:ban"' in client
+
+    def test_no_name_collisions_between_modules(self):
+        types, _ = _generate("nested_modules.json")
+        assert "class ChatMessagesListQueryArgs(BaseModel):" in types
+        assert "class ApiMessagesListQueryArgs(BaseModel):" in types
+
+    def test_types_file_is_valid_python(self):
+        types, _ = _generate("nested_modules.json")
+        compile(types, "_types.py", "exec")
+
+    def test_client_file_is_valid_python(self):
+        _, client = _generate("nested_modules.json")
+        compile(client, "_client.py", "exec")
 
 
 # ---------------------------------------------------------------------------

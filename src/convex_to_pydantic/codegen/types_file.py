@@ -24,6 +24,8 @@ from ..types import (
     ConvexString,
     ConvexType,
     ConvexUnion,
+    FunctionSchema,
+    TableSchema,
 )
 
 
@@ -40,9 +42,7 @@ def _is_all_string_literal_union(t: ConvexType) -> bool:
     return all(isinstance(v, ConvexLiteral) and isinstance(v.value, str) for v in t.variants)
 
 
-def _collect_str_enums(
-    export: ConvexExport, names: NameRegistry
-) -> dict[str, list[str]]:
+def _collect_str_enums(export: ConvexExport, names: NameRegistry) -> dict[str, list[str]]:
     """Collect all all-string-literal unions, keyed by derived enum name.
 
     Returns enum class name → list of string values.
@@ -92,9 +92,7 @@ def _collect_str_enums(
 # ---------------------------------------------------------------------------
 
 
-def _enum_name_for_union(
-    t: ConvexUnion, enums: dict[str, list[str]]
-) -> str | None:
+def _enum_name_for_union(t: ConvexUnion, enums: dict[str, list[str]]) -> str | None:
     values = tuple(v.value for v in t.variants if isinstance(v, ConvexLiteral))
     for name, vals in enums.items():
         if tuple(vals) == values:
@@ -176,8 +174,26 @@ def _collect_objects(
     export: ConvexExport,
 ) -> list[ConvexObject]:
     """Collect all ConvexObject nodes in dependency order (leaves first)."""
-    objects: list[ConvexObject] = []
     seen: set[int] = set()
+    objects: list[ConvexObject] = []
+
+    for table in export.tables:
+        objects.extend(_collect_objects_for_root(table.document_type, seen))
+    for fn in export.functions:
+        objects.extend(_collect_objects_for_root(fn.args, seen))
+
+    return objects
+
+
+def _collect_objects_for_root(
+    root: ConvexObject,
+    seen: set[int],
+) -> list[ConvexObject]:
+    """Collect ConvexObject nodes reachable from one root, in dependency order (leaves first).
+
+    The shared ``seen`` set prevents emitting objects already claimed by an earlier root.
+    """
+    objects: list[ConvexObject] = []
 
     def _walk(t: ConvexType) -> None:
         if isinstance(t, ConvexArray):
@@ -200,17 +216,50 @@ def _collect_objects(
             _walk(f.field_type)
         objects.append(t)
 
-    for table in export.tables:
-        _walk(table.document_type)
-    for fn in export.functions:
-        _walk(fn.args)
-
+    _walk(root)
     return objects
 
 
 # ---------------------------------------------------------------------------
 # Code generation (all pure — returns strings)
 # ---------------------------------------------------------------------------
+
+
+def _check_imports_for_objects(objects: list[ConvexObject]) -> tuple[bool, bool]:
+    """Return (needs_any, needs_literal) after scanning all objects."""
+    needs_any = False
+    needs_literal = False
+
+    def _check(t: ConvexType) -> None:
+        nonlocal needs_any, needs_literal
+        if isinstance(t, ConvexAny):
+            needs_any = True
+        elif isinstance(t, ConvexLiteral):
+            needs_literal = True
+        elif isinstance(t, ConvexArray):
+            _check(t.element)
+        elif isinstance(t, ConvexRecord):
+            _check(t.keys)
+            _check(t.values)
+        elif isinstance(t, ConvexUnion):
+            if not _is_all_string_literal_union(t):
+                for v in t.variants:
+                    _check(v)
+            else:
+                for v in t.variants:
+                    if isinstance(v, ConvexLiteral) and not isinstance(v.value, str):
+                        needs_literal = True
+                    elif not isinstance(v, ConvexLiteral):
+                        _check(v)
+        elif isinstance(t, ConvexObject):
+            for f in t.fields:
+                _check(f.field_type)
+
+    for obj in objects:
+        for f in obj.fields:
+            _check(f.field_type)
+
+    return needs_any, needs_literal
 
 
 def _render_field_line(
@@ -305,21 +354,21 @@ def _render_enum(name: str, values: list[str]) -> str:
     return "\n".join(lines)
 
 
-def generate_types_file(export: ConvexExport, names: NameRegistry) -> str:
-    """Generate the full _types.py file content. Pure function."""
-    enums = _collect_str_enums(export, names)
-    objects = _collect_objects(export)
+def generate_types_file(
+    export: ConvexExport,
+    names: NameRegistry,
+    *,
+    enums: dict[str, list[str]] | None = None,
+) -> str:
+    """Generate the full _types.py file content. Pure function.
 
-    sections: list[str] = []
+    Output is grouped by entity: each table's models + constructor appear together,
+    then each function's arg models + constructor.
+    """
+    if enums is None:
+        enums = _collect_str_enums(export, names)
 
-    # Header
-    sections.append(
-        '"""\nAuto-generated Convex types.\nDO NOT EDIT. Regenerate with: convex-to-pydantic generate\n"""'
-    )
-    sections.append("from __future__ import annotations")
-    sections.append("")
-
-    # Collect needed imports
+    # Collect all objects and check needed imports in one pass.
     needs_any = False
     needs_literal = False
 
@@ -348,9 +397,34 @@ def generate_types_file(export: ConvexExport, names: NameRegistry) -> str:
             for f in t.fields:
                 _check_imports(f.field_type)
 
-    for obj in objects:
-        for f in obj.fields:
-            _check_imports(f.field_type)
+    # Single walk: collect per-entity object groups AND scan imports.
+    seen: set[int] = set()
+    table_groups: list[tuple[TableSchema, list[ConvexObject]]] = []
+    fn_groups: list[tuple[FunctionSchema, list[ConvexObject]]] = []
+
+    for table in export.tables:
+        objs = _collect_objects_for_root(table.document_type, seen)
+        table_groups.append((table, objs))
+        for obj in objs:
+            for f in obj.fields:
+                _check_imports(f.field_type)
+
+    for fn in export.functions:
+        objs = _collect_objects_for_root(fn.args, seen)
+        fn_groups.append((fn, objs))
+        for obj in objs:
+            for f in obj.fields:
+                _check_imports(f.field_type)
+
+    # Build output
+    sections: list[str] = []
+
+    # Header
+    sections.append(
+        '"""\nAuto-generated Convex types.\nDO NOT EDIT. Regenerate with: convex-to-pydantic generate\n"""'
+    )
+    sections.append("from __future__ import annotations")
+    sections.append("")
 
     typing_imports = []
     if needs_any:
@@ -367,7 +441,7 @@ def generate_types_file(export: ConvexExport, names: NameRegistry) -> str:
     sections.append("from pydantic import BaseModel, ConfigDict, Field")
     sections.append("")
 
-    # StrEnums
+    # StrEnums (global, deduplicated)
     if enums:
         sections.append("")
         sections.append("# --- Enums ---")
@@ -376,48 +450,43 @@ def generate_types_file(export: ConvexExport, names: NameRegistry) -> str:
             sections.append(_render_enum(name, values))
             sections.append("")
 
-    # Models
-    sections.append("")
-    sections.append("# --- Models ---")
-    sections.append("")
-    for obj in objects:
-        sections.append(_render_model(obj, names, enums))
-        sections.append("")
-
-    # Constructors
-    has_table_constructors = any(
-        any(f.name not in ("_id", "_creationTime") for f in table.document_type.fields)
-        for table in export.tables
-    )
-    has_fn_constructors = bool(export.functions)
-
-    if has_table_constructors or has_fn_constructors:
-        sections.append("")
-        sections.append("# --- Constructors ---")
-        sections.append("")
-
-    for table in export.tables:
-        user_fields = tuple(
-            f for f in table.document_type.fields
-            if f.name not in ("_id", "_creationTime")
-        )
-        if user_fields:
-            table_class = names.object_name(table.document_type)
-            fn_name = to_snake(table.table_name) + "_table"
-            sections.append(
-                _render_constructor(
-                    fn_name,
-                    table_class,
-                    user_fields,
-                    f"Construct a {table.table_name} document (without system fields).",
-                    names,
-                    enums,
-                )
-            )
+    # Per-table groups: nested models + table model + constructor
+    for table, table_objects in table_groups:
+        if table_objects:
             sections.append("")
+            sections.append(f"# --- Table: {table.table_name} ---")
+            sections.append("")
+            for obj in table_objects:
+                sections.append(_render_model(obj, names, enums))
+                sections.append("")
 
-    for fn in export.functions:
+            user_fields = tuple(
+                f for f in table.document_type.fields if f.name not in ("_id", "_creationTime")
+            )
+            if user_fields:
+                table_class = names.object_name(table.document_type)
+                fn_name = to_snake(table.table_name) + "_table"
+                sections.append(
+                    _render_constructor(
+                        fn_name,
+                        table_class,
+                        user_fields,
+                        f"Construct a {table.table_name} document (without system fields).",
+                        names,
+                        enums,
+                    )
+                )
+                sections.append("")
+
+    # Per-function groups: nested arg models + arg model + constructor
+    for fn, fn_objects in fn_groups:
         fn_names = names.function_names(fn)
+        sections.append("")
+        sections.append(f"# --- Function: {fn.module}:{fn.name} ({fn.fn_type}) ---")
+        sections.append("")
+        for obj in fn_objects:
+            sections.append(_render_model(obj, names, enums))
+            sections.append("")
         sections.append(
             _render_constructor(
                 fn_names.fn_name,

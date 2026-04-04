@@ -1,0 +1,114 @@
+{
+  "tables": [
+    {
+      "tableName": "messages",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "content": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          },
+          "channelId": {
+            "fieldType": { "type": "id", "tableName": "channels" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "tableName": "channels",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "name": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          }
+        }
+      }
+    }
+  ],
+  "functions": [
+    {
+      "module": "chat/messages",
+      "name": "list",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {
+          "channelId": {
+            "fieldType": { "type": "id", "tableName": "channels" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "chat/messages",
+      "name": "send",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "channelId": {
+            "fieldType": { "type": "id", "tableName": "channels" },
+            "optional": false
+          },
+          "content": {
+            "fieldType": { "type": "string" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "api/messages",
+      "name": "list",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {
+          "limit": {
+            "fieldType": { "type": "float64" },
+            "optional": true
+          }
+        }
+      }
+    },
+    {
+      "module": "api/messages",
+      "name": "delete",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "messageId": {
+            "fieldType": { "type": "id", "tableName": "messages" },
+            "optional": false
+          }
+        }
+      }
+    },
+    {
+      "module": "admin/chat/moderate",
+      "name": "ban",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "userId": {
+            "fieldType": { "type": "id", "tableName": "users" },
+            "optional": false
+          },
+          "reason": {
+            "fieldType": { "type": "string" },
+            "optional": true
+          }
+        }
+      }
+    }
+  ]
+}
