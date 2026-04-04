@@ -43,7 +43,6 @@ wheels = [
 
 [[package]]
 name = "convex-to-pydantic"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
