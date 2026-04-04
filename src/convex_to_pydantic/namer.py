@@ -24,7 +24,7 @@ from .types import (
 def to_pascal(s: str) -> str:
     """Convert a string to PascalCase."""
     parts = re.sub(r"([a-z])([A-Z])", r"\1_\2", s)
-    parts = re.split(r"[_\-.:]+", parts)
+    parts = re.split(r"[_\-./:]+", parts)
     return "".join(p.capitalize() for p in parts if p)
 
 
@@ -33,7 +33,7 @@ def to_snake(s: str) -> str:
     stripped = s.lstrip("_")
     stripped = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", stripped)
     stripped = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", stripped)
-    result = re.sub(r"[_\-.:]+", "_", stripped).lower()
+    result = re.sub(r"[_\-./:]+", "_", stripped).lower()
     if keyword.iskeyword(result) or result in ("id", "type"):
         result = result + "_"
     return result
@@ -42,13 +42,15 @@ def to_snake(s: str) -> str:
 @dataclass(frozen=True)
 class FunctionNames:
     """Names for a single Convex function."""
-    class_name: str    # e.g. "CalendarsCreateMutationArgs"
-    fn_name: str       # e.g. "calendars_create_mutation"
+
+    class_name: str  # e.g. "CalendarsCreateMutationArgs"
+    fn_name: str  # e.g. "calendars_create_mutation"
 
 
 @dataclass
 class NameRegistry:
     """Maps IR objects to their assigned names. Keyed by id() of the object."""
+
     objects: dict[int, str] = field(default_factory=dict)
     functions: dict[int, FunctionNames] = field(default_factory=dict)
 
@@ -80,9 +82,7 @@ class _Namer:
         return self.assign(to_pascal(table_name) + "Table")
 
     def name_function_args(self, module: str, fn_name: str, fn_type: str) -> str:
-        return self.assign(
-            to_pascal(module) + to_pascal(fn_name) + to_pascal(fn_type) + "Args"
-        )
+        return self.assign(to_pascal(module) + to_pascal(fn_name) + to_pascal(fn_type) + "Args")
 
     def name_function(self, module: str, fn_name: str, fn_type: str) -> str:
         return to_snake(module) + "_" + to_snake(fn_name) + "_" + to_snake(fn_type)

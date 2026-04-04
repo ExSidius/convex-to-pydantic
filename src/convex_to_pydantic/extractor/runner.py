@@ -54,7 +54,9 @@ def extract(convex_dir: Path) -> dict:
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise ExtractionError(f"Invalid JSON from extractor: {e}\nOutput: {result.stdout[:500]}") from e
+        raise ExtractionError(
+            f"Invalid JSON from extractor: {e}\nOutput: {result.stdout[:500]}"
+        ) from e
 
 
 def extract_from_json(path: Path) -> dict:

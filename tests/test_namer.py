@@ -30,6 +30,12 @@ class TestToPascal:
     def test_with_hyphens(self):
         assert to_pascal("my-component") == "MyComponent"
 
+    def test_with_slashes(self):
+        assert to_pascal("chat/messages") == "ChatMessages"
+
+    def test_with_deep_slashes(self):
+        assert to_pascal("admin/chat/moderate") == "AdminChatModerate"
+
 
 class TestToSnake:
     def test_camel_case(self):
@@ -56,6 +62,12 @@ class TestToSnake:
     def test_system_field_creation_time(self):
         assert to_snake("_creationTime") == "creation_time"
 
+    def test_with_slashes(self):
+        assert to_snake("chat/messages") == "chat_messages"
+
+    def test_with_deep_slashes(self):
+        assert to_snake("admin/chat/moderate") == "admin_chat_moderate"
+
 
 class TestNamer:
     def test_no_collision(self):
@@ -75,11 +87,30 @@ class TestNamer:
 
     def test_name_function_args(self):
         n = _Namer()
-        assert n.name_function_args("calendars", "create", "mutation") == "CalendarsCreateMutationArgs"
+        assert (
+            n.name_function_args("calendars", "create", "mutation") == "CalendarsCreateMutationArgs"
+        )
+
+    def test_name_function_args_nested_module(self):
+        n = _Namer()
+        assert n.name_function_args("chat/messages", "list", "query") == "ChatMessagesListQueryArgs"
 
     def test_name_function(self):
         n = _Namer()
         assert n.name_function("calendars", "create", "mutation") == "calendars_create_mutation"
+
+    def test_name_function_nested_module(self):
+        n = _Namer()
+        assert n.name_function("chat/messages", "list", "query") == "chat_messages_list_query"
+
+    def test_different_modules_no_collision(self):
+        """Functions in chat/messages and api/messages get distinct names."""
+        n = _Namer()
+        name1 = n.name_function_args("chat/messages", "list", "query")
+        name2 = n.name_function_args("api/messages", "list", "query")
+        assert name1 == "ChatMessagesListQueryArgs"
+        assert name2 == "ApiMessagesListQueryArgs"
+        assert name1 != name2
 
     def test_name_nested_object(self):
         n = _Namer()
@@ -135,3 +166,19 @@ class TestAssignNames:
         r1 = assign_names(export)
         r2 = assign_names(export)
         assert dict(r1.objects) == dict(r2.objects)
+
+    def test_nested_modules_distinct_names(self):
+        """chat/messages and api/messages produce distinct class names."""
+        blob = json.loads((FIXTURES / "nested_modules.json").read_text())
+        export = parse_export(blob)
+        registry = assign_names(export)
+        fn_names = [registry.function_names(fn) for fn in export.functions]
+        class_names = [n.class_name for n in fn_names]
+        assert len(class_names) == len(set(class_names)), f"Duplicate class names: {class_names}"
+
+    def test_nested_modules_no_duplicate_names(self):
+        blob = json.loads((FIXTURES / "nested_modules.json").read_text())
+        export = parse_export(blob)
+        registry = assign_names(export)
+        all_names = list(registry.objects.values())
+        assert len(all_names) == len(set(all_names))

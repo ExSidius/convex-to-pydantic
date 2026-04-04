@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from ..namer import NameRegistry, to_snake
-from ..types import ConvexExport
+from ..types import ConvexExport, ConvexObject
 from .types_file import _collect_str_enums, _field_comment, _render_type
 
 _METHOD_MAP = {
@@ -18,10 +18,34 @@ _METHOD_MAP = {
     "action": "action",
 }
 
+_BUILTIN_NAMES = frozenset({"Any", "None", "Literal", "Field", "BaseModel", "ConfigDict"})
+_PASCAL_RE = re.compile(r"\b[A-Z][A-Za-z0-9]+\b")
 
-def generate_client_file(export: ConvexExport, names: NameRegistry) -> str:
+
+def _collect_type_refs(
+    obj: ConvexObject,
+    names: NameRegistry,
+    parent_name: str,
+    enums: dict[str, list[str]],
+    out: set[str],
+) -> None:
+    """Collect PascalCase type references from an object's fields."""
+    for field in obj.fields:
+        rendered = _render_type(field.field_type, names, parent_name, field.name, enums)
+        for token in _PASCAL_RE.findall(rendered):
+            if token not in _BUILTIN_NAMES:
+                out.add(token)
+
+
+def generate_client_file(
+    export: ConvexExport,
+    names: NameRegistry,
+    *,
+    enums: dict[str, list[str]] | None = None,
+) -> str:
     """Generate the full _client.py file content. Pure function."""
-    enums = _collect_str_enums(export, names)
+    if enums is None:
+        enums = _collect_str_enums(export, names)
     sections: list[str] = []
 
     # Header
@@ -42,11 +66,7 @@ def generate_client_file(export: ConvexExport, names: NameRegistry) -> str:
         fn_names = names.function_names(fn)
         type_imports.add(fn_names.class_name)
         type_imports.add(fn_names.fn_name)
-        for field in fn.args.fields:
-            rendered = _render_type(field.field_type, names, fn_names.class_name, field.name, enums)
-            for token in re.findall(r"\b[A-Z][A-Za-z0-9]+\b", rendered):
-                if token not in ("Any", "None", "Literal", "Field", "BaseModel", "ConfigDict"):
-                    type_imports.add(token)
+        _collect_type_refs(fn.args, names, fn_names.class_name, enums, type_imports)
 
     if type_imports:
         sections.append(f"from ._types import {', '.join(sorted(type_imports))}")
@@ -67,7 +87,9 @@ def generate_client_file(export: ConvexExport, names: NameRegistry) -> str:
             optional = [f for f in fn.args.fields if f.optional]
             for field in required + optional:
                 py_name = to_snake(field.name)
-                type_str = _render_type(field.field_type, names, fn_names.class_name, field.name, enums)
+                type_str = _render_type(
+                    field.field_type, names, fn_names.class_name, field.name, enums
+                )
                 comment = _field_comment(field.field_type)
                 if field.optional:
                     type_str = f"{type_str} | None"
@@ -79,9 +101,7 @@ def generate_client_file(export: ConvexExport, names: NameRegistry) -> str:
         lines.append(f'    """Convex {fn.fn_type}: {path}"""')
 
         if fn.args.fields:
-            arg_names = ", ".join(
-                f"{to_snake(f.name)}={to_snake(f.name)}" for f in fn.args.fields
-            )
+            arg_names = ", ".join(f"{to_snake(f.name)}={to_snake(f.name)}" for f in fn.args.fields)
             lines.append(f"    args = {fn_names.fn_name}({arg_names})")
         else:
             lines.append(f"    args = {fn_names.fn_name}()")

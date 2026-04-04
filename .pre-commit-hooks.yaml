@@ -1,0 +1,7 @@
+- id: convex-to-pydantic-check
+  name: convex-to-pydantic check
+  description: Verify generated Pydantic models are up-to-date with Convex schema.
+  entry: convex-to-pydantic generate --check
+  language: python
+  pass_filenames: false
+  always_run: true

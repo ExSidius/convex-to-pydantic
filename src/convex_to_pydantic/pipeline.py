@@ -7,38 +7,89 @@ cli.py and __init__.py at the edges.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 
 from .codegen.client_file import generate_client_file
-from .codegen.types_file import generate_types_file
+from .codegen.tree import generate_module_file, generate_tables_file, generate_barrel
+from .codegen.types_file import _collect_str_enums, generate_types_file
 from .converter import parse_export
 from .namer import NameRegistry, assign_names
-from .types import ConvexExport
+from .types import ConvexExport, FunctionSchema
 
 
 @dataclass(frozen=True)
 class GeneratedFiles:
     """The output of the pure pipeline — just strings, no IO."""
+
     types_content: str
     client_content: str
     num_tables: int
     num_functions: int
+    # Tree mode: relative path → content (e.g. {"chat/messages.py": "...", "__init__.py": "..."})
+    tree_files: dict[str, str] = field(default_factory=dict)
 
 
-def transform(blob: dict) -> GeneratedFiles:
+def transform(blob: dict, *, output_mode: str = "single") -> GeneratedFiles:
     """Pure pipeline: raw JSON dict → generated file contents.
 
     blob → parse (IR) → assign names → codegen → GeneratedFiles
     """
     export = parse_export(blob)
     names = assign_names(export)
+    if output_mode == "tree":
+        return _generate_tree(export, names)
     return _generate(export, names)
 
 
 def _generate(export: ConvexExport, names: NameRegistry) -> GeneratedFiles:
+    enums = _collect_str_enums(export, names)
     return GeneratedFiles(
-        types_content=generate_types_file(export, names),
-        client_content=generate_client_file(export, names),
+        types_content=generate_types_file(export, names, enums=enums),
+        client_content=generate_client_file(export, names, enums=enums),
         num_tables=len(export.tables),
         num_functions=len(export.functions),
+    )
+
+
+def _generate_tree(export: ConvexExport, names: NameRegistry) -> GeneratedFiles:
+    """Generate per-module files mirroring the Convex directory structure."""
+    enums = _collect_str_enums(export, names)
+    tree_files: dict[str, str] = {}
+
+    # Tables go into _tables.py
+    if export.tables:
+        tree_files["_tables.py"] = generate_tables_file(export, names, enums)
+
+    # Group functions by module
+    by_module: dict[str, list[FunctionSchema]] = defaultdict(list)
+    for fn in export.functions:
+        by_module[fn.module].append(fn)
+
+    module_public_names: dict[str, list[str]] = {}
+    for module, fns in sorted(by_module.items()):
+        path = module.replace("/", "/") + ".py"
+        content = generate_module_file(fns, names, enums)
+        tree_files[path] = content
+        # Collect public names for barrel
+        fn_names_list = []
+        for fn in fns:
+            fn_ns = names.function_names(fn)
+            fn_names_list.append(fn_ns.class_name)
+            fn_names_list.append(fn_ns.fn_name)
+            fn_names_list.append(fn_ns.fn_name + "_call")
+        module_public_names[module] = fn_names_list
+
+    # Barrel __init__.py
+    tree_files["__init__.py"] = generate_barrel(
+        has_tables=bool(export.tables),
+        module_public_names=module_public_names,
+    )
+
+    return GeneratedFiles(
+        types_content="",
+        client_content="",
+        num_tables=len(export.tables),
+        num_functions=len(export.functions),
+        tree_files=tree_files,
     )
