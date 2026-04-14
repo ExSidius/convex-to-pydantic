@@ -43,6 +43,33 @@ class TestChatApp:
         assert "id_: str" in types
         assert "creation_time: float" in types
 
+    def test_system_fields_are_optional(self):
+        """System fields are server-assigned; clients must be able to construct
+        a table model without providing them."""
+        types, _ = _generate("chat_app.json")
+        assert "id_: str | None = Field(default=None, alias='_id')" in types
+        assert (
+            "creation_time: float | None = Field(default=None, alias='_creationTime')"
+            in types
+        )
+
+    def test_table_model_constructible_without_system_fields(self):
+        """Exec the generated module and instantiate a table model with only
+        user-provided fields — mirrors the JSONL-export / fixture use case."""
+        types, _ = _generate("chat_app.json")
+        ns: dict = {}
+        exec(compile(types, "_types.py", "exec"), ns)
+        MessagesTable = ns["MessagesTable"]
+        doc = MessagesTable(author="alice", body="hi")
+        assert doc.id_ is None
+        assert doc.creation_time is None
+        # And parsing a server document with system fields still works.
+        full = MessagesTable.model_validate(
+            {"_id": "abc", "_creationTime": 1.0, "author": "alice", "body": "hi"}
+        )
+        assert full.id_ == "abc"
+        assert full.creation_time == 1.0
+
     def test_types_has_constructor(self):
         types, _ = _generate("chat_app.json")
         assert "def messages_list_query(" in types
