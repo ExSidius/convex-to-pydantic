@@ -110,8 +110,21 @@ def generate_module_file(
     functions: list[FunctionSchema],
     names: NameRegistry,
     enums: dict[str, list[str]],
+    *,
+    client_style: str = "async",
 ) -> str:
-    """Generate a single module file with function arg models + constructors + client wrappers."""
+    """Generate a single module file with function arg models + constructors + client wrappers.
+
+    Args:
+        client_style: "async" (default) emits ``async def`` wrappers using
+            ``await client.<method>(...)``; "sync" emits plain ``def``
+            wrappers calling the client synchronously.
+    """
+    if client_style not in ("async", "sync"):
+        raise ValueError(f"Invalid client_style {client_style!r}; expected 'async' or 'sync'.")
+    is_async = client_style == "async"
+    def_prefix = "async def " if is_async else "def "
+    call_prefix = "await " if is_async else ""
     sections: list[str] = []
     module = functions[0].module
 
@@ -190,7 +203,7 @@ def generate_module_file(
         sections.append("")
 
         # Client wrapper
-        lines = [f"async def {fn_names.fn_name}_call("]
+        lines = [f"{def_prefix}{fn_names.fn_name}_call("]
         lines.append('    client: "ConvexClient",')
         if fn.args.fields:
             lines.append("    *,")
@@ -215,7 +228,7 @@ def generate_module_file(
         else:
             lines.append(f"    args = {fn_names.fn_name}()")
         lines.append(
-            f'    return await client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
+            f'    return {call_prefix}client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
         )
         sections.append("\n".join(lines))
         sections.append("")

@@ -1,4 +1,7 @@
-"""Generate _client.py from the IR — async client wrappers around ConvexClient.
+"""Generate _client.py from the IR — client wrappers around ConvexClient.
+
+Supports both async (``async def ... await client.query(...)``) and sync
+(``def ... client.query(...)``) styles via the ``client_style`` argument.
 
 Pure module — takes immutable IR + NameRegistry, returns a string.
 No IO, no side effects.
@@ -42,10 +45,22 @@ def generate_client_file(
     names: NameRegistry,
     *,
     enums: dict[str, list[str]] | None = None,
+    client_style: str = "async",
 ) -> str:
-    """Generate the full _client.py file content. Pure function."""
+    """Generate the full _client.py file content. Pure function.
+
+    Args:
+        client_style: "async" (default) emits ``async def`` wrappers using
+            ``await client.<method>(...)``; "sync" emits plain ``def``
+            wrappers calling the client synchronously.
+    """
+    if client_style not in ("async", "sync"):
+        raise ValueError(f"Invalid client_style {client_style!r}; expected 'async' or 'sync'.")
     if enums is None:
         enums = _collect_str_enums(export, names)
+    is_async = client_style == "async"
+    def_prefix = "async def " if is_async else "def "
+    call_prefix = "await " if is_async else ""
     sections: list[str] = []
 
     # Header
@@ -78,7 +93,7 @@ def generate_client_file(
         method = _METHOD_MAP.get(fn.fn_type, "query")
         path = f"{fn.module}:{fn.name}"
 
-        lines = [f"async def {fn_names.fn_name}_call("]
+        lines = [f"{def_prefix}{fn_names.fn_name}_call("]
         lines.append('    client: "ConvexClient",')
 
         if fn.args.fields:
@@ -107,7 +122,7 @@ def generate_client_file(
             lines.append(f"    args = {fn_names.fn_name}()")
 
         lines.append(
-            f'    return await client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
+            f'    return {call_prefix}client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
         )
 
         sections.append("\n".join(lines))

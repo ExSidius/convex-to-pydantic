@@ -113,6 +113,7 @@ def _run_pipeline(
     force: bool = False,
     do_format: bool = True,
     output_mode: str = "single",
+    client_style: str = "async",
 ) -> PipelineResult:
     """Run the full extraction → codegen pipeline."""
     t_start = time.monotonic()
@@ -161,7 +162,7 @@ def _run_pipeline(
 
     # Pure transform
     t_transform = time.monotonic()
-    generated = transform(blob, output_mode=output_mode)
+    generated = transform(blob, output_mode=output_mode, client_style=client_style)
     transform_ms = _elapsed_ms(t_transform)
 
     # Write files
@@ -209,6 +210,7 @@ def _run_check(
     output_dir: Path,
     *,
     do_format: bool = True,
+    client_style: str = "async",
 ) -> None:
     """Check if generated files are up-to-date. Exits 0 if matching, 1 if stale."""
     # Extract
@@ -220,7 +222,7 @@ def _run_check(
         raise typer.BadParameter("Either --convex-dir or --input must be provided.")
 
     # Transform
-    generated = transform(blob)
+    generated = transform(blob, client_style=client_style)
 
     # Format the generated content to match what _write_generated would produce
     expected_types = (
@@ -314,6 +316,14 @@ def generate(
         bool,
         typer.Option("--check", help="Check if generated files are up-to-date (exit 1 if stale)."),
     ] = False,
+    client_style: Annotated[
+        Optional[str],
+        typer.Option(
+            "--client-style",
+            help="Generated client flavor: 'async' (default) emits `async def` + `await`; "
+            "'sync' emits plain `def` for callers that can't use async.",
+        ),
+    ] = None,
 ) -> None:
     """Generate Pydantic models from Convex schema."""
     cfg = load_config()
@@ -323,12 +333,23 @@ def generate(
     do_format = cfg.format and not no_format
 
     output_mode = cfg.output_mode
+    resolved_client_style = client_style or cfg.client_style
+    if resolved_client_style not in ("async", "sync"):
+        raise typer.BadParameter(
+            f"--client-style must be 'async' or 'sync', got {resolved_client_style!r}."
+        )
 
     if output_dir is None:
         raise typer.BadParameter("--output-dir is required (or set output_dir in pyproject.toml).")
 
     if check:
-        _run_check(convex_dir, input_json, output_dir, do_format=do_format)
+        _run_check(
+            convex_dir,
+            input_json,
+            output_dir,
+            do_format=do_format,
+            client_style=resolved_client_style,
+        )
         return
 
     result = _run_pipeline(
@@ -338,6 +359,7 @@ def generate(
         force=force,
         do_format=do_format,
         output_mode=output_mode,
+        client_style=resolved_client_style,
     )
     if result.regenerated:
         typer.echo(f"Generated {output_dir / '_types.py'}")
@@ -380,7 +402,14 @@ def watch(
         raise typer.BadParameter("--output-dir is required (or set output_dir in pyproject.toml).")
 
     typer.echo(f"Watching {convex_dir} for changes...")
-    result = _run_pipeline(convex_dir, None, output_dir, force=True)
+    result = _run_pipeline(
+        convex_dir,
+        None,
+        output_dir,
+        force=True,
+        output_mode=cfg.output_mode,
+        client_style=cfg.client_style,
+    )
     _print_result(result, output_dir)
     typer.echo("Ready. Waiting for changes... (Ctrl-C to stop)\n")
 
@@ -388,7 +417,13 @@ def watch(
         ts = time.strftime("%H:%M:%S")
         typer.echo(f"[{ts}] Change detected")
         try:
-            result = _run_pipeline(convex_dir, None, output_dir)
+            result = _run_pipeline(
+                convex_dir,
+                None,
+                output_dir,
+                output_mode=cfg.output_mode,
+                client_style=cfg.client_style,
+            )
             _print_result(result, output_dir)
         except (OSError, json.JSONDecodeError, ValueError, RuntimeError) as e:
             typer.echo(f"  Error: {e}", err=True)

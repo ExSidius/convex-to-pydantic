@@ -21,6 +21,13 @@ def _generate(fixture_name: str) -> tuple[str, str]:
     return result.types_content, result.client_content
 
 
+def _generate_sync(fixture_name: str) -> tuple[str, str]:
+    """Helper: load fixture, run pure pipeline in sync mode, return (types, client)."""
+    blob = json.loads((FIXTURES / fixture_name).read_text())
+    result = transform(blob, client_style="sync")
+    return result.types_content, result.client_content
+
+
 # ---------------------------------------------------------------------------
 # Chat app (simple baseline)
 # ---------------------------------------------------------------------------
@@ -257,6 +264,42 @@ class TestNestedModules:
 # ---------------------------------------------------------------------------
 # Cross-fixture: all fixtures produce valid Python
 # ---------------------------------------------------------------------------
+
+
+class TestSyncClient:
+    """Sync client_style: emit plain `def` wrappers without `await`."""
+
+    def test_client_has_sync_wrappers(self):
+        _, client = _generate_sync("chat_app.json")
+        assert "def messages_list_query_call(" in client
+        assert "def messages_send_mutation_call(" in client
+
+    def test_no_async_keyword(self):
+        _, client = _generate_sync("chat_app.json")
+        assert "async def" not in client
+        assert "await " not in client
+
+    def test_sync_client_calls(self):
+        _, client = _generate_sync("chat_app.json")
+        assert 'return client.query("messages:list"' in client
+        assert 'return client.mutation("messages:send"' in client
+
+    def test_sync_action_wrapper(self):
+        _, client = _generate_sync("ai_app.json")
+        assert 'return client.action("embeddings:search"' in client
+        assert "async def" not in client
+
+    def test_types_identical_to_async(self):
+        """Switching client_style must not change _types.py."""
+        for fixture in FIXTURES.glob("*.json"):
+            async_types, _ = _generate(fixture.name)
+            sync_types, _ = _generate_sync(fixture.name)
+            assert async_types == sync_types, f"types differ for {fixture.name}"
+
+    def test_all_fixtures_sync_compile(self):
+        for fixture in FIXTURES.glob("*.json"):
+            _, client = _generate_sync(fixture.name)
+            compile(client, f"{fixture.stem}/_client.py", "exec")
 
 
 class TestAllFixturesValid:

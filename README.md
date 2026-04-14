@@ -1,6 +1,6 @@
 # convex-to-pydantic
 
-Generate fully-typed Pydantic models and async client wrappers from your [Convex](https://convex.dev) schema — automatically, with zero manual wiring.
+Generate fully-typed Pydantic models and async (or sync) client wrappers from your [Convex](https://convex.dev) schema — automatically, with zero manual wiring.
 
 ```
 convex-to-pydantic generate --convex-dir ./convex --output-dir ./src/myapp/convex_generated
@@ -122,6 +122,28 @@ async def messages_send_mutation_call(
     return await client.mutation("messages:send", args.model_dump(by_alias=True, exclude_none=True))
 ```
 
+### Sync client wrappers
+
+Not every caller can use `async`/`await` (Flask handlers, scripts, notebooks, sync
+test harnesses, etc.). Pass `--client-style sync` — or set
+`client_style = "sync"` in `[tool.convex-to-pydantic]` — to emit plain `def`
+wrappers that call the client synchronously:
+
+```python
+def messages_send_mutation_call(
+    client: "ConvexClient",
+    *,
+    body: str,
+    author: str,
+) -> Any:
+    """Convex mutation: messages:send"""
+    args = messages_send_mutation(body=body, author=author)
+    return client.mutation("messages:send", args.model_dump(by_alias=True, exclude_none=True))
+```
+
+`_types.py` is identical across both styles; only the wrappers in `_client.py`
+(and per-module files in `tree` output mode) differ.
+
 ## CLI reference
 
 ### `generate`
@@ -136,8 +158,20 @@ convex-to-pydantic generate [OPTIONS]
 | `--input PATH` | Path to a pre-exported JSON file (alternative to `--convex-dir`). |
 | `--output-dir PATH` | **(required)** Directory to write `_types.py` and `_client.py`. |
 | `--force / -f` | Regenerate even if the schema hasn't changed. |
+| `--client-style [async\|sync]` | Flavor of client wrappers to emit. `async` (default) emits `async def` + `await`; `sync` emits plain `def` for callers that can't use async. |
 
 Either `--convex-dir` or `--input` must be provided. Use `--input` for CI workflows or when you've pre-exported the schema JSON.
+
+### Configuration via `pyproject.toml`
+
+```toml
+[tool.convex-to-pydantic]
+convex_dir = "./convex"
+output_dir = "./src/myapp/convex_generated"
+output_mode = "single"        # or "tree"
+client_style = "async"        # or "sync"
+format = true
+```
 
 ### `watch`
 
@@ -291,6 +325,13 @@ generate(
 generate_from_json(
     input_json=Path("./schema_export.json"),
     output_dir=Path("./src/myapp/convex_generated"),
+)
+
+# Emit sync (`def`) wrappers instead of async (`async def`)
+generate(
+    convex_dir=Path("./convex"),
+    output_dir=Path("./src/myapp/convex_generated"),
+    client_style="sync",
 )
 ```
 
