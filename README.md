@@ -154,7 +154,7 @@ convex-to-pydantic generate [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--convex-dir PATH` | Path to your Convex directory (contains `_generated/api.js`). |
+| `--convex-dir PATH` | Path to your Convex directory (e.g. `./convex`). Works whether or not you've run `npx convex dev`. |
 | `--input PATH` | Path to a pre-exported JSON file (alternative to `--convex-dir`). |
 | `--output-dir PATH` | **(required)** Directory to write `_types.py` and `_client.py`. |
 | `--force / -f` | Regenerate even if the schema hasn't changed. |
@@ -281,7 +281,7 @@ src/convex_to_pydantic/
 │   └── client_file.py    # IR + NameRegistry → _client.py string (pure)
 ├── extractor/
 │   ├── runner.py          # Node.js subprocess wrapper (IO edge)
-│   └── schema_export.mjs  # Bundled JS: auto-discovers via _generated/api.js
+│   └── schema_export.mjs  # Bundled JS: walks convex/ directly, imports each module
 ├── watcher.py             # Debounced watchdog file monitor (IO edge)
 └── cli.py                 # Typer CLI (IO edge)
 ```
@@ -307,7 +307,7 @@ This means:
 
 ### Module auto-discovery
 
-The bundled `schema_export.mjs` walks the API object exported by `_generated/api.js` at runtime. No hard-coded `CONVEX_MODULES` list — when you add a new Convex function, it's picked up automatically.
+The bundled `schema_export.mjs` walks the user's `convex/` directory directly, importing each module file to discover queries, mutations, and actions. It works whether or not `npx convex dev` has been run — we don't rely on `_generated/api.js` being populated (Convex ships an `anyApi` Proxy stub there until it is). TypeScript is supported via `esbuild` (a transitive dependency of the `convex` npm package). Reserved filenames (`schema.*`, `http.*`, `crons.*`, `auth.config.*`, `convex.config.*`) and underscore/dot-prefixed files are skipped; internal functions (`internalQuery`, `internalMutation`, `internalAction`) are filtered out. No hard-coded `CONVEX_MODULES` list — add a new Convex function and it's picked up automatically.
 
 ## Programmatic API
 
@@ -370,8 +370,15 @@ git clone https://github.com/ExSidius/convex-to-pydantic.git
 cd convex-to-pydantic
 uv sync
 
-# Run tests (113 tests, ~0.3s)
+# Run tests
 uv run pytest
+
+# Integration tests that exercise the JS extractor against real Convex
+# projects need `pnpm` on PATH (auto-skip otherwise). The subset marked
+# `requires_docker` also needs a running Docker daemon — those deploy
+# each fixture to a self-hosted Convex backend and verify the extractor
+# works against both the pre-deploy `anyApi` stub and the concrete
+# post-deploy `_generated/api.js`.
 
 # Lint + format
 uv run ruff check .

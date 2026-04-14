@@ -1,0 +1,35 @@
+# Self-hosted Convex backend for integration tests.
+#
+# Brings up a single convex-backend container on ephemeral host ports.
+# The conftest fixture reads the chosen ports from `docker compose port`
+# and generates an admin key via the container's CLI.
+#
+# Docs: https://github.com/get-convex/convex-backend
+services:
+  convex-backend:
+    # Pin to a specific tag so test runs aren't at the mercy of upstream
+    # breakage. Bump this deliberately.
+    image: ghcr.io/get-convex/convex-backend:c1a06c12e2ca72afc3eeedf4153a58f169ba1c70
+    # Ephemeral ports — the conftest fixture resolves the actual port via
+    # `docker compose port`.
+    ports:
+      - "3210"  # HTTP API
+      - "3211"  # Site proxy
+    environment:
+      INSTANCE_NAME: c2p-tests
+      INSTANCE_SECRET: 4361726e697461732c20666f72206d792063617473
+      # Disable auth beacon / telemetry for hermetic runs.
+      DISABLE_BEACON: "true"
+      REDACT_LOGS_TO_CLIENT: "false"
+    healthcheck:
+      # The backend exposes /version on the main port.
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3210/version > /dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    volumes:
+      - convex-data:/convex/data
+
+volumes:
+  convex-data:

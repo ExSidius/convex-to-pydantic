@@ -36,6 +36,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "requires_docker: test requires a running Docker daemon (for self-hosted Convex backend)",
+    "requires_pnpm: test requires pnpm and node on PATH",
+]
 
 [tool.ruff]
 line-length = 100

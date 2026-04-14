@@ -1,6 +1,13 @@
 # Auto-generated version file (hatch-vcs)
 src/convex_to_pydantic/_version.py
 
+# Node: installed by conftest for test fixtures
+tests/fixtures/convex_projects/*/node_modules/
+tests/fixtures/convex_projects/*/convex/_generated/api.anyapi-stub.js
+
+# Transpiled-TS cache used by schema_export.mjs
+.c2p-cache/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
