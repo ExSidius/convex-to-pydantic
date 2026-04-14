@@ -93,10 +93,10 @@ Given a Convex schema with a `messages` table and `messages:send` mutation:
 ```python
 class MessagesTable(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    id_: str = Field(alias="_id")
-    creation_time: float = Field(alias="_creationTime")
     author: str
     body: str
+    id_: str | None = Field(default=None, alias="_id")
+    creation_time: float | None = Field(default=None, alias="_creationTime")
 
 class MessagesSendMutationArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -261,10 +261,10 @@ This means:
 
 All table models automatically include:
 
-- `id_: str = Field(alias="_id")` — document ID
-- `creation_time: float = Field(alias="_creationTime")` — creation timestamp
+- `id_: str | None = Field(default=None, alias="_id")` — document ID (server-assigned)
+- `creation_time: float | None = Field(default=None, alias="_creationTime")` — creation timestamp (server-assigned)
 
-These are excluded from table constructor functions (since Convex manages them).
+These are excluded from table constructor functions (since Convex manages them) and default to `None` so client code can construct table models for fixtures, validation, or JSONL export without supplying server-managed values. They still parse correctly when present (e.g. from `model_validate` on a server document).
 
 ## Architecture
 

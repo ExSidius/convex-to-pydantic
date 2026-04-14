@@ -27,8 +27,8 @@ from .types import (
 )
 
 _SYSTEM_FIELDS = (
-    ConvexField(name="_id", field_type=ConvexString(), optional=False),
-    ConvexField(name="_creationTime", field_type=ConvexFloat64(), optional=False),
+    ConvexField(name="_id", field_type=ConvexString(), optional=True),
+    ConvexField(name="_creationTime", field_type=ConvexFloat64(), optional=True),
 )
 
 
