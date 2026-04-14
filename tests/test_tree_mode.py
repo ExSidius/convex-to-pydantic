@@ -17,6 +17,13 @@ def _tree(fixture_name: str) -> dict[str, str]:
     return result.tree_files
 
 
+def _tree_sync(fixture_name: str) -> dict[str, str]:
+    """Helper: run tree pipeline in sync client mode."""
+    blob = json.loads((FIXTURES / fixture_name).read_text())
+    result = transform(blob, output_mode="tree", client_style="sync")
+    return result.tree_files
+
+
 class TestTreeChatApp:
     def test_has_tables_file(self):
         files = _tree("chat_app.json")
@@ -93,5 +100,36 @@ class TestTreeAllFixtures:
             if fixture.name == "large_export.json":
                 continue  # skip large fixture for speed
             files = _tree(fixture.name)
+            for path, content in files.items():
+                compile(content, f"{fixture.stem}/{path}", "exec")
+
+
+class TestTreeSyncClient:
+    def test_module_file_has_sync_wrappers(self):
+        files = _tree_sync("chat_app.json")
+        module = files["messages.py"]
+        assert "def messages_list_query_call(" in module
+        assert "def messages_send_mutation_call(" in module
+        assert "async def" not in module
+        assert "await " not in module
+
+    def test_sync_client_method_calls(self):
+        files = _tree_sync("chat_app.json")
+        module = files["messages.py"]
+        assert 'return client.query("messages:list"' in module
+        assert 'return client.mutation("messages:send"' in module
+
+    def test_nested_modules_sync(self):
+        files = _tree_sync("nested_modules.json")
+        for path in ("chat/messages.py", "api/messages.py", "admin/chat/moderate.py"):
+            content = files[path]
+            assert "async def" not in content, f"async found in {path}"
+            assert "await " not in content, f"await found in {path}"
+
+    def test_all_fixtures_sync_compile(self):
+        for fixture in FIXTURES.glob("*.json"):
+            if fixture.name == "large_export.json":
+                continue
+            files = _tree_sync(fixture.name)
             for path, content in files.items():
                 compile(content, f"{fixture.stem}/{path}", "exec")

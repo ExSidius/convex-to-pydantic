@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from convex_to_pydantic.pipeline import GeneratedFiles, transform
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -58,3 +60,53 @@ class TestTransform:
             assert False, "Should have raised"
         except AttributeError:
             pass
+
+
+class TestClientStyle:
+    def test_default_is_async(self):
+        blob = json.loads((FIXTURES / "chat_app.json").read_text())
+        result = transform(blob)
+        assert "async def messages_send_mutation_call(" in result.client_content
+        assert "await client.mutation(" in result.client_content
+
+    def test_sync_strips_async_and_await(self):
+        blob = json.loads((FIXTURES / "chat_app.json").read_text())
+        result = transform(blob, client_style="sync")
+        client = result.client_content
+        assert "def messages_send_mutation_call(" in client
+        assert "async def" not in client
+        assert "await " not in client
+        assert "return client.mutation(" in client
+
+    def test_sync_output_compiles(self):
+        for fixture in FIXTURES.glob("*.json"):
+            blob = json.loads(fixture.read_text())
+            result = transform(blob, client_style="sync")
+            compile(result.client_content, f"{fixture.stem}/_client.py", "exec")
+
+    def test_sync_deterministic(self):
+        blob = json.loads((FIXTURES / "kitchen_sink.json").read_text())
+        r1 = transform(blob, client_style="sync")
+        r2 = transform(blob, client_style="sync")
+        assert r1 == r2
+
+    def test_types_unchanged_across_styles(self):
+        """Only _client.py should differ between async/sync."""
+        blob = json.loads((FIXTURES / "chat_app.json").read_text())
+        async_result = transform(blob, client_style="async")
+        sync_result = transform(blob, client_style="sync")
+        assert async_result.types_content == sync_result.types_content
+        assert async_result.client_content != sync_result.client_content
+
+    def test_invalid_client_style_raises(self):
+        with pytest.raises(ValueError, match="client_style"):
+            transform({"tables": [], "functions": []}, client_style="threaded")
+
+    def test_sync_tree_mode(self):
+        blob = json.loads((FIXTURES / "chat_app.json").read_text())
+        result = transform(blob, output_mode="tree", client_style="sync")
+        module = result.tree_files["messages.py"]
+        assert "def messages_send_mutation_call(" in module
+        assert "async def" not in module
+        assert "await " not in module
+        assert "return client.mutation(" in module

@@ -19,6 +19,7 @@ class Config:
     input_json: Path | None = None
     format: bool = True
     output_mode: str = "single"
+    client_style: str = "async"
 
 
 def load_config(start_dir: Path | None = None) -> Config:
@@ -39,12 +40,19 @@ def load_config(start_dir: Path | None = None) -> Config:
         return Config()
 
     root = toml_path.parent
+    client_style = section.get("client_style", "async")
+    if client_style not in ("async", "sync"):
+        raise ValueError(
+            f"Invalid client_style {client_style!r} in pyproject.toml; expected 'async' or 'sync'."
+        )
+
     return Config(
         convex_dir=_resolve_path(root, section.get("convex_dir")),
         output_dir=_resolve_path(root, section.get("output_dir")),
         input_json=_resolve_path(root, section.get("input")),
         format=section.get("format", True),
         output_mode=section.get("output_mode", "single"),
+        client_style=client_style,
     )
 
 

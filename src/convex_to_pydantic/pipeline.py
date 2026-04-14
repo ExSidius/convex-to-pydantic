@@ -30,29 +30,43 @@ class GeneratedFiles:
     tree_files: dict[str, str] = field(default_factory=dict)
 
 
-def transform(blob: dict, *, output_mode: str = "single") -> GeneratedFiles:
+def transform(
+    blob: dict, *, output_mode: str = "single", client_style: str = "async"
+) -> GeneratedFiles:
     """Pure pipeline: raw JSON dict → generated file contents.
 
     blob → parse (IR) → assign names → codegen → GeneratedFiles
+
+    Args:
+        blob: Raw Convex schema export as a dict.
+        output_mode: "single" (default) emits one _types.py + _client.py; "tree"
+            emits per-module files.
+        client_style: "async" (default) emits `async def` wrappers using
+            `await client.<method>(...)`; "sync" emits plain `def` wrappers
+            that call the client synchronously.
     """
+    if client_style not in ("async", "sync"):
+        raise ValueError(f"Invalid client_style {client_style!r}; expected 'async' or 'sync'.")
     export = parse_export(blob)
     names = assign_names(export)
     if output_mode == "tree":
-        return _generate_tree(export, names)
-    return _generate(export, names)
+        return _generate_tree(export, names, client_style=client_style)
+    return _generate(export, names, client_style=client_style)
 
 
-def _generate(export: ConvexExport, names: NameRegistry) -> GeneratedFiles:
+def _generate(export: ConvexExport, names: NameRegistry, *, client_style: str) -> GeneratedFiles:
     enums = _collect_str_enums(export, names)
     return GeneratedFiles(
         types_content=generate_types_file(export, names, enums=enums),
-        client_content=generate_client_file(export, names, enums=enums),
+        client_content=generate_client_file(export, names, enums=enums, client_style=client_style),
         num_tables=len(export.tables),
         num_functions=len(export.functions),
     )
 
 
-def _generate_tree(export: ConvexExport, names: NameRegistry) -> GeneratedFiles:
+def _generate_tree(
+    export: ConvexExport, names: NameRegistry, *, client_style: str
+) -> GeneratedFiles:
     """Generate per-module files mirroring the Convex directory structure."""
     enums = _collect_str_enums(export, names)
     tree_files: dict[str, str] = {}
@@ -69,7 +83,7 @@ def _generate_tree(export: ConvexExport, names: NameRegistry) -> GeneratedFiles:
     module_public_names: dict[str, list[str]] = {}
     for module, fns in sorted(by_module.items()):
         path = module.replace("/", "/") + ".py"
-        content = generate_module_file(fns, names, enums)
+        content = generate_module_file(fns, names, enums, client_style=client_style)
         tree_files[path] = content
         # Collect public names for barrel
         fn_names_list = []

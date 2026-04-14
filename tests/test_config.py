@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from convex_to_pydantic.config import Config, load_config
 
 
@@ -27,6 +29,7 @@ class TestLoadConfig:
             'input = "./schema.json"\n'
             "format = false\n"
             'output_mode = "tree"\n'
+            'client_style = "sync"\n'
         )
         cfg = load_config(tmp_path)
         assert cfg.convex_dir == (tmp_path / "convex").resolve()
@@ -34,6 +37,21 @@ class TestLoadConfig:
         assert cfg.input_json == (tmp_path / "schema.json").resolve()
         assert cfg.format is False
         assert cfg.output_mode == "tree"
+        assert cfg.client_style == "sync"
+
+    def test_client_style_defaults_to_async(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.convex-to-pydantic]\noutput_dir = "./out"\n'
+        )
+        cfg = load_config(tmp_path)
+        assert cfg.client_style == "async"
+
+    def test_client_style_invalid_raises(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.convex-to-pydantic]\nclient_style = "threaded"\n'
+        )
+        with pytest.raises(ValueError, match="client_style"):
+            load_config(tmp_path)
 
     def test_partial_config(self, tmp_path: Path):
         (tmp_path / "pyproject.toml").write_text(
@@ -62,3 +80,4 @@ class TestLoadConfig:
         assert cfg.input_json is None
         assert cfg.format is True
         assert cfg.output_mode == "single"
+        assert cfg.client_style == "async"
