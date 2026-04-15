@@ -15,6 +15,16 @@ repos:
         types: [python]
         pass_filenames: false
 
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+
   - repo: https://github.com/biomejs/pre-commit
     rev: v0.6.1
     hooks:

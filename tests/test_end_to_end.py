@@ -195,9 +195,7 @@ class TestMixedJsTsEndToEnd:
 
 @pytest.mark.requires_pnpm
 class TestExcludedEndToEnd:
-    def test_only_kept_modules_surface_in_python(
-        self, prepared_fixture, run_extractor
-    ):
+    def test_only_kept_modules_surface_in_python(self, prepared_fixture, run_extractor):
         fixture = prepared_fixture("excluded")
         blob = run_extractor(fixture)
         result = transform(blob, output_mode="tree")
@@ -234,9 +232,7 @@ class TestExcludedEndToEnd:
 
 @pytest.mark.requires_pnpm
 class TestInternalFunctionsEndToEnd:
-    def test_only_public_function_in_generated_python(
-        self, prepared_fixture, run_extractor
-    ):
+    def test_only_public_function_in_generated_python(self, prepared_fixture, run_extractor):
         fixture = prepared_fixture("internal_functions")
         result = _extract_and_transform(fixture, run_extractor)
         assert result.num_functions == 1

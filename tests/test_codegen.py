@@ -7,6 +7,8 @@ No IO involved.
 from __future__ import annotations
 
 import json
+import sys
+import types as _pytypes
 from pathlib import Path
 
 from convex_to_pydantic.pipeline import transform
@@ -26,6 +28,33 @@ def _generate_sync(fixture_name: str) -> tuple[str, str]:
     blob = json.loads((FIXTURES / fixture_name).read_text())
     result = transform(blob, client_style="sync")
     return result.types_content, result.client_content
+
+
+_EXEC_PKG_COUNTER = 0
+
+
+def _exec_client(client_str: str, types_str: str) -> dict:
+    """Exec a generated `_client.py` in a synthetic package so its
+    `from ._types import ...` resolves. Returns the client namespace."""
+    global _EXEC_PKG_COUNTER
+    _EXEC_PKG_COUNTER += 1
+    pkg_name = f"_c2p_test_pkg_{_EXEC_PKG_COUNTER}"
+
+    pkg = _pytypes.ModuleType(pkg_name)
+    pkg.__path__ = []  # type: ignore[attr-defined]
+    sys.modules[pkg_name] = pkg
+
+    types_mod = _pytypes.ModuleType(f"{pkg_name}._types")
+    exec(compile(types_str, "_types.py", "exec"), types_mod.__dict__)
+    sys.modules[f"{pkg_name}._types"] = types_mod
+
+    try:
+        client_ns: dict = {"__name__": f"{pkg_name}._client", "__package__": pkg_name}
+        exec(compile(client_str, "_client.py", "exec"), client_ns)
+        return client_ns
+    finally:
+        sys.modules.pop(f"{pkg_name}._types", None)
+        sys.modules.pop(pkg_name, None)
 
 
 # ---------------------------------------------------------------------------
@@ -48,10 +77,7 @@ class TestChatApp:
         a table model without providing them."""
         types, _ = _generate("chat_app.json")
         assert "id_: str | None = Field(default=None, alias='_id')" in types
-        assert (
-            "creation_time: float | None = Field(default=None, alias='_creationTime')"
-            in types
-        )
+        assert "creation_time: float | None = Field(default=None, alias='_creationTime')" in types
 
     def test_table_model_constructible_without_system_fields(self):
         """Exec the generated module and instantiate a table model with only
@@ -329,6 +355,38 @@ class TestSyncClient:
             compile(client, f"{fixture.stem}/_client.py", "exec")
 
 
+class TestLiteralInFnArgs:
+    """Regression: `str | Literal["portfolio"]` in function args must import Literal.
+
+    Previously `_client.py` hardcoded `from typing import Any, TYPE_CHECKING`,
+    so any fn whose rendered arg type emitted `Literal[...]` produced a file
+    that failed at import with `NameError: name 'Literal' is not defined`.
+    """
+
+    def test_client_imports_literal(self):
+        _, client = _generate("literal_in_fn_args.json")
+        assert "from typing import Any, Literal, TYPE_CHECKING" in client
+
+    def test_client_emits_literal_annotation(self):
+        _, client = _generate("literal_in_fn_args.json")
+        assert 'Literal["portfolio"]' in client or "Literal['portfolio']" in client
+
+    def test_client_executes(self):
+        """Exec the generated module in a synthetic package and force
+        annotation resolution — this is what catches the original bug
+        (NameError on unimported `Literal`). Without `get_type_hints`, the
+        `from __future__ import annotations` directive keeps annotations as
+        lazy strings and the missing name is never looked up."""
+        import typing
+
+        types, client = _generate("literal_in_fn_args.json")
+        ns = _exec_client(client, types)
+        fn = ns["portfolio_get_query_call"]
+        # ConvexClient is a TYPE_CHECKING-only forward ref; stub it so
+        # annotation resolution doesn't fail on that unrelated symbol.
+        typing.get_type_hints(fn, localns={"ConvexClient": object})
+
+
 class TestAllFixturesValid:
     def test_all_types_compile(self):
         for fixture in FIXTURES.glob("*.json"):
@@ -340,6 +398,22 @@ class TestAllFixturesValid:
         for fixture in FIXTURES.glob("*.json"):
             types, _ = _generate(fixture.name)
             exec(compile(types, f"{fixture.stem}/_types.py", "exec"), {"__name__": "__test__"})
+
+    def test_all_clients_execute(self):
+        """Exec each generated _client.py and resolve annotations so missing
+        imports (e.g. forgotten `Literal`) surface here rather than downstream
+        at import time. Annotation resolution is required — `from __future__
+        import annotations` keeps annotations as lazy strings otherwise."""
+        import typing
+
+        # Stub the TYPE_CHECKING-only ConvexClient forward reference.
+        localns = {"ConvexClient": object}
+        for fixture in FIXTURES.glob("*.json"):
+            types, client = _generate(fixture.name)
+            ns = _exec_client(client, types)
+            for name, obj in list(ns.items()):
+                if callable(obj) and name.endswith("_call"):
+                    typing.get_type_hints(obj, localns=localns)
 
     def test_transform_is_deterministic(self):
         """Same input always produces identical output."""
