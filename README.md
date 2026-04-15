@@ -408,7 +408,10 @@ Configured hooks (see `.pre-commit-config.yaml`):
 - **ruff check** — lint with auto-fix
 - **ruff format** — code formatting
 - **ty** — type checking (Astral)
+- **pytest** — full test suite (catches bugs in generated output that lint/typecheck can't see)
 - **biome check** — JS/TS linting and formatting
+
+`prek` reads the same `.pre-commit-config.yaml` as classic `pre-commit`, so contributors can use either tool interchangeably.
 
 ### Test fixtures
 

@@ -1,0 +1,25 @@
+{
+  "tables": [],
+  "functions": [
+    {
+      "module": "portfolio",
+      "name": "get",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {
+          "calendarId": {
+            "fieldType": {
+              "type": "union",
+              "value": [
+                { "type": "string" },
+                { "type": "literal", "value": "portfolio" }
+              ]
+            },
+            "optional": false
+          }
+        }
+      }
+    }
+  ]
+}

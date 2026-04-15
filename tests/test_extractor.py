@@ -53,8 +53,7 @@ def _fn_by_key(blob: dict, module: str, name: str) -> dict:
         if f["module"] == module and f["name"] == name:
             return f
     raise AssertionError(
-        f"No function {module}.{name} in output. Present: "
-        f"{sorted(_fn_keys(blob))}"
+        f"No function {module}.{name} in output. Present: {sorted(_fn_keys(blob))}"
     )
 
 
@@ -262,9 +261,7 @@ class TestExcludedFixture:
             "admin/nested/_draft",
         ],
     )
-    def test_excluded_modules_absent(
-        self, prepared_fixture, run_extractor, excluded_entry
-    ):
+    def test_excluded_modules_absent(self, prepared_fixture, run_extractor, excluded_entry):
         """None of schema/http/crons/dotted-config/underscore-prefixed files
         should appear as a module in the output."""
         fixture = prepared_fixture("excluded")
@@ -272,9 +269,7 @@ class TestExcludedFixture:
         modules = {f["module"] for f in blob["functions"]}
         assert excluded_entry not in modules
 
-    def test_helpers_file_scanned_but_yields_nothing(
-        self, prepared_fixture, run_extractor
-    ):
+    def test_helpers_file_scanned_but_yields_nothing(self, prepared_fixture, run_extractor):
         """`helpers.ts` is NOT excluded — it's walked, but since it has no
         Convex functions, it contributes zero entries."""
         fixture = prepared_fixture("excluded")
@@ -364,9 +359,7 @@ class TestBrokenModuleRobustness:
         broken.write_text("this is not valid typescript !!! === @@@\n")
 
         res = run_extractor_raw(fixture_dir)
-        assert res.returncode == 0, (
-            f"Extractor exited {res.returncode}; stderr:\n{res.stderr}"
-        )
+        assert res.returncode == 0, f"Extractor exited {res.returncode}; stderr:\n{res.stderr}"
         blob = json.loads(res.stdout)
         # The good module's functions still surface.
         assert ("messages", "list") in _fn_keys(blob)

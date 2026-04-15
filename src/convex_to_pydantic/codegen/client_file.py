@@ -13,7 +13,12 @@ import re
 
 from ..namer import NameRegistry, to_snake
 from ..types import ConvexExport, ConvexObject
-from .types_file import _collect_str_enums, _field_comment, _render_type
+from .types_file import (
+    _check_imports_for_objects,
+    _collect_str_enums,
+    _field_comment,
+    _render_type,
+)
 
 _METHOD_MAP = {
     "query": "query",
@@ -69,7 +74,15 @@ def generate_client_file(
     )
     sections.append("from __future__ import annotations")
     sections.append("")
-    sections.append("from typing import Any, TYPE_CHECKING")
+
+    # `Any` is always needed (generated wrappers always return `-> Any`);
+    # `TYPE_CHECKING` is always needed (guards the ConvexClient import).
+    # `Literal` is only imported when a fn arg's rendered type emits it.
+    _, needs_literal = _check_imports_for_objects([fn.args for fn in export.functions])
+    typing_imports = ["Any", "TYPE_CHECKING"]
+    if needs_literal:
+        typing_imports.append("Literal")
+    sections.append(f"from typing import {', '.join(sorted(typing_imports))}")
     sections.append("")
     sections.append("if TYPE_CHECKING:")
     sections.append("    from convex import ConvexClient")
