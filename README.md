@@ -15,33 +15,22 @@ Your IDE immediately gets autocomplete, type checking, and inline docs for every
 
 ## Installation
 
-Install directly from GitHub releases — no PyPI required.
-
 ```bash
-# Install the latest release (with uv, recommended)
-uv add convex-to-pydantic --find-links https://github.com/ExSidius/convex-to-pydantic/releases/latest/download/
-
-# Install a specific version
-uv add convex-to-pydantic==0.1.0 --find-links https://github.com/ExSidius/convex-to-pydantic/releases/download/v0.1.0/
-
-# Install as a CLI tool (globally)
-uv tool install convex-to-pydantic --find-links https://github.com/ExSidius/convex-to-pydantic/releases/latest/download/
+uv add convex-to-pydantic
 
 # Or with pip
-pip install convex-to-pydantic --find-links https://github.com/ExSidius/convex-to-pydantic/releases/latest/download/
+pip install convex-to-pydantic
+
+# Install as a CLI tool (globally)
+uv tool install convex-to-pydantic
 ```
 
 ### Install from source (development)
 
 ```bash
-# Latest main branch
-uv add git+https://github.com/ExSidius/convex-to-pydantic.git
-
-# Pin to a specific branch
-uv add git+https://github.com/ExSidius/convex-to-pydantic.git@main
-
-# Or with pip
-pip install git+https://github.com/ExSidius/convex-to-pydantic.git
+git clone https://github.com/ExSidius/convex-to-pydantic.git
+cd convex-to-pydantic
+uv sync
 ```
 
 ## Quick start
