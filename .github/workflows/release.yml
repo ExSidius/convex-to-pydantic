@@ -2,8 +2,11 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -18,16 +21,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v4
+      - name: Bump version and push tag
+        id: tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag_prefix: v
+          default_bump: "false"
 
-      - name: Build package
+      - name: Fetch new tag
+        if: steps.tag.outputs.new_tag != ''
+        run: git fetch --tags
+
+      - uses: astral-sh/setup-uv@v4
+        if: steps.tag.outputs.new_tag != ''
+
+      - name: Build
+        if: steps.tag.outputs.new_tag != ''
         run: uv build
 
       - name: Publish to PyPI
+        if: steps.tag.outputs.new_tag != ''
         run: uv publish
 
       - name: Create GitHub Release
+        if: steps.tag.outputs.new_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.new_tag }}
           generate_release_notes: true
           files: dist/*
