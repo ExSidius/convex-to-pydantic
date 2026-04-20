@@ -8,17 +8,14 @@ tag, publishes to PyPI, and creates a GitHub Release.
 
 **Never create git tags manually.** Tags are managed by the release workflow.
 
-## Commit Message Format
+## PR Title Format
 
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) to determine
-version bumps automatically.
+This repo uses **squash merges**. The PR title becomes the single commit that lands on
+`main`, so **the PR title must follow conventional commits format** — that is what the
+release workflow reads to decide whether and how to bump the version.
 
 ```
 <type>(<optional scope>): <short description>
-
-[optional body]
-
-[optional footer]
 ```
 
 ### Types and version impact
@@ -40,10 +37,8 @@ version bumps automatically.
 feat: add --watch flag to regenerate on schema changes
 fix: handle tables with no fields in codegen
 feat!: rename --output flag to --out
-
-BREAKING CHANGE: --output has been renamed to --out
 chore: bump pydantic to 2.7
 ```
 
-Every PR with user-facing changes should include at least one `feat:` or `fix:` commit.
-PRs with only `chore:`, `docs:`, etc. will merge without triggering a release.
+PRs with `feat:` or `fix:` titles trigger a release on merge. PRs with `chore:`,
+`docs:`, `ci:`, etc. merge silently without a release.
