@@ -7,6 +7,7 @@ from pathlib import Path
 
 from convex_to_pydantic.converter import parse_export
 from convex_to_pydantic.namer import _Namer, NameRegistry, assign_names, to_pascal, to_snake
+from convex_to_pydantic.types import ConvexObject
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -147,9 +148,11 @@ class TestAssignNames:
         assert registry.object_name(table.document_type) == "AnalyticsEventsTable"
         metadata_field = next(f for f in table.document_type.fields if f.name == "metadata")
         metadata_obj = metadata_field.field_type
+        assert isinstance(metadata_obj, ConvexObject)
         assert registry.object_name(metadata_obj) == "AnalyticsEventsTableMetadata"
         campaign_field = next(f for f in metadata_obj.fields if f.name == "campaign")
         campaign_obj = campaign_field.field_type
+        assert isinstance(campaign_obj, ConvexObject)
         assert registry.object_name(campaign_obj) == "AnalyticsEventsTableMetadataCampaign"
 
     def test_no_duplicate_names(self):

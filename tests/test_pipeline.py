@@ -56,7 +56,7 @@ class TestTransform:
         blob = json.loads((FIXTURES / "chat_app.json").read_text())
         result = transform(blob)
         try:
-            result.types_content = "modified"
+            result.types_content = "modified"  # type: ignore
             assert False, "Should have raised"
         except AttributeError:
             pass

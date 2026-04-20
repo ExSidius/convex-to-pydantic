@@ -12,8 +12,8 @@ repos:
         name: ty type check
         entry: uv run ty check
         language: system
-        types: [python]
         pass_filenames: false
+        always_run: true
 
   - repo: local
     hooks:
@@ -21,8 +21,8 @@ repos:
         name: pytest
         entry: uv run pytest -q
         language: system
-        types: [python]
         pass_filenames: false
+        always_run: true
         stages: [pre-commit]
 
   - repo: https://github.com/biomejs/pre-commit
