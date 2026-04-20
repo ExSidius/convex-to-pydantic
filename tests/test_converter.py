@@ -155,7 +155,7 @@ class TestParseConvexType:
     def test_results_are_immutable(self):
         result = parse_convex_type({"type": "string"})
         with pytest.raises(Exception):
-            result.type = "int64"
+            result.type = "int64"  # type: ignore
 
 
 # ---------------------------------------------------------------------------

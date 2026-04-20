@@ -58,7 +58,7 @@ def _collect_str_enums(export: ConvexExport, names: NameRegistry) -> dict[str, l
     def _walk_field(parent_name: str, field_name: str, t: ConvexType) -> None:
         if _is_all_string_literal_union(t):
             assert isinstance(t, ConvexUnion)
-            values = [v.value for v in t.variants if isinstance(v, ConvexLiteral)]
+            values = [v.value for v in t.variants if isinstance(v, ConvexLiteral) and isinstance(v.value, str)]
             key = tuple(values)
             if key in seen_value_sets:
                 return
