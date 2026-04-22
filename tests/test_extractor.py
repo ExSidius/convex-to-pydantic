@@ -383,6 +383,50 @@ class TestCliSanity:
         assert res.returncode != 0
         assert "convex directory not found" in res.stderr.lower()
 
+    def test_esbuild_missing_exits_nonzero(self, run_extractor_raw, tmp_path):
+        """A convex dir with .ts files but no node_modules must exit non-zero.
+
+        Without the fix the extractor would silently emit {"tables":[],"functions":[]}
+        and exit 0, letting the Python pipeline overwrite generated files with empty stubs.
+        This test lives in a tmp dir so no parent-directory node_modules can supply esbuild.
+        """
+        convex_dir = tmp_path / "convex"
+        convex_dir.mkdir()
+        (convex_dir / "messages.ts").write_text(
+            'import { query } from "convex/server";\n'
+            "export const list = query({ handler: async () => [] });\n"
+        )
+        res = run_extractor_raw(tmp_path)
+        assert res.returncode != 0, (
+            f"Expected non-zero exit when esbuild is missing, got 0.\n"
+            f"stdout: {res.stdout!r}\nstderr: {res.stderr!r}"
+        )
+
+    def test_esbuild_missing_error_mentions_install(self, run_extractor_raw, tmp_path):
+        """The fatal error message must tell the user to run pnpm/npm install."""
+        convex_dir = tmp_path / "convex"
+        convex_dir.mkdir()
+        (convex_dir / "messages.ts").write_text("export const x = 1;\n")
+        res = run_extractor_raw(tmp_path)
+        assert "esbuild" in res.stderr.lower()
+        assert "install" in res.stderr.lower()
+
+    def test_empty_output_warns_to_stderr(self, run_extractor_raw, tmp_path):
+        """When extraction succeeds but produces no tables/functions a warning
+        must appear on stderr so the user knows something may be wrong."""
+        convex_dir = tmp_path / "convex"
+        convex_dir.mkdir()
+        # A plain JS helper: no Convex functions, no schema → empty output.
+        (convex_dir / "helpers.js").write_text(
+            "export function formatMessage(msg) { return msg.trim(); }\n"
+        )
+        res = run_extractor_raw(tmp_path)
+        assert res.returncode == 0, res.stderr
+        assert "warning" in res.stderr.lower() or "no tables" in res.stderr.lower()
+        blob = json.loads(res.stdout)
+        assert blob["tables"] == []
+        assert blob["functions"] == []
+
 
 # ---------------------------------------------------------------------------
 # Stub-vs-concrete parity (requires docker)
