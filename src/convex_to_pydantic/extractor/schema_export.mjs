@@ -503,4 +503,21 @@ functions.sort((a, b) => {
 });
 tables.sort((a, b) => (a.tableName < b.tableName ? -1 : a.tableName > b.tableName ? 1 : 0));
 
+if (esbuildLoadFailed) {
+  process.stderr.write(
+    "[convex-to-pydantic] Fatal: esbuild is not available in your Convex project's " +
+      "node_modules. Run `pnpm install` (or `npm install`) in the Convex project root " +
+      "before running codegen.\n"
+  );
+  process.exit(1);
+}
+
+if (tables.length === 0 && functions.length === 0) {
+  process.stderr.write(
+    "[convex-to-pydantic] Warning: extraction produced no tables and no functions. " +
+      "If your Convex project is genuinely empty this is expected. Otherwise, check " +
+      "that your schema and function files are in the directory passed to --convex-dir.\n"
+  );
+}
+
 console.log(JSON.stringify({ tables, functions }, null, 2));
