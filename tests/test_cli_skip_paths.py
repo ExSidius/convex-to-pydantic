@@ -88,9 +88,7 @@ class TestBlobHashSkipDoesNotWriteDisk:
         assert stored_source_after == stored_source_before
         assert stored_blob_after == stored_blob_before
 
-    def test_generated_files_not_written_on_blob_hash_skip(
-        self, tmp_path: Path, monkeypatch
-    ):
+    def test_generated_files_not_written_on_blob_hash_skip(self, tmp_path: Path, monkeypatch):
         """``_types.py`` and ``_client.py`` must not be touched on a Layer 2 skip."""
         blob = json.loads((FIXTURES / "chat_app.json").read_text())
         _stub_extract(blob, monkeypatch)
