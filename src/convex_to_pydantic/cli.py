@@ -148,8 +148,9 @@ def _run_pipeline(
     # Layer 2: blob hash (skip codegen)
     new_blob_hash = blob_hash(blob)
     if not force and new_blob_hash == stored_blob:
-        if source_digest:
-            write_stored_hashes(output_dir, source_digest, new_blob_hash)
+        # Do NOT write the hash file here — no generated files changed, so any
+        # disk write would cause pre-commit to report "files were modified by
+        # this hook" spuriously.
         return PipelineResult(
             regenerated=False,
             skipped_at="blob_hash",
