@@ -20,6 +20,7 @@ class Config:
     format: bool = True
     output_mode: str = "single"
     client_style: str = "async"
+    return_type: str = "pydantic"
 
 
 def load_config(start_dir: Path | None = None) -> Config:
@@ -46,6 +47,13 @@ def load_config(start_dir: Path | None = None) -> Config:
             f"Invalid client_style {client_style!r} in pyproject.toml; expected 'async' or 'sync'."
         )
 
+    return_type = section.get("return_type", "pydantic")
+    if return_type not in ("pydantic", "typeddict", "any"):
+        raise ValueError(
+            f"Invalid return_type {return_type!r} in pyproject.toml; "
+            "expected 'pydantic', 'typeddict', or 'any'."
+        )
+
     return Config(
         convex_dir=_resolve_path(root, section.get("convex_dir")),
         output_dir=_resolve_path(root, section.get("output_dir")),
@@ -53,6 +61,7 @@ def load_config(start_dir: Path | None = None) -> Config:
         format=section.get("format", True),
         output_mode=section.get("output_mode", "single"),
         client_style=client_style,
+        return_type=return_type,
     )
 
 

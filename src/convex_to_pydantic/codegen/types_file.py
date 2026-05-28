@@ -83,10 +83,24 @@ def _collect_str_enums(export: ConvexExport, names: NameRegistry) -> dict[str, l
         if isinstance(t, ConvexRecord):
             _walk_field(parent_name, field_name + "Value", t.values)
 
+    def _walk_returns(fn: FunctionSchema) -> None:
+        if fn.returns is None:
+            return
+        if isinstance(fn.returns, ConvexObject):
+            _walk_object(fn.returns)
+            return
+        # Non-object top-level return: synthesize a parent label and walk into it.
+        # The label mirrors the namer's *Returns suffix so enum names stay aligned.
+        parent_label = names.function_names(fn).class_name
+        if parent_label.endswith("Args"):
+            parent_label = parent_label[: -len("Args")] + "Returns"
+        _walk_field(parent_label, "", fn.returns)
+
     for table in export.tables:
         _walk_object(table.document_type)
     for fn in export.functions:
         _walk_object(fn.args)
+        _walk_returns(fn)
 
     return enums
 
@@ -185,12 +199,14 @@ def _collect_objects(
         objects.extend(_collect_objects_for_root(table.document_type, seen))
     for fn in export.functions:
         objects.extend(_collect_objects_for_root(fn.args, seen))
+        if fn.returns is not None:
+            objects.extend(_collect_objects_for_root(fn.returns, seen))
 
     return objects
 
 
 def _collect_objects_for_root(
-    root: ConvexObject,
+    root: ConvexType,
     seen: set[int],
 ) -> list[ConvexObject]:
     """Collect ConvexObject nodes reachable from one root, in dependency order (leaves first).
@@ -312,6 +328,37 @@ def _render_model(
     return "\n".join(lines)
 
 
+def _render_typeddict(
+    obj: ConvexObject,
+    names: NameRegistry,
+    enums: dict[str, list[str]],
+) -> str:
+    """Render a ConvexObject as a TypedDict class.
+
+    TypedDicts can't alias keys, so field names are used as-is (matching the
+    JSON wire format). Optional fields use ``NotRequired[T | None]`` (PEP 655)
+    so absent-vs-null is distinguishable.
+    """
+    class_name = names.object_name(obj)
+    lines = [f"class {class_name}(TypedDict):"]
+
+    if not obj.fields:
+        lines.append("    pass")
+        return "\n".join(lines)
+
+    required = [f for f in obj.fields if not f.optional]
+    optional = [f for f in obj.fields if f.optional]
+    for field in required + optional:
+        type_str = _render_type(field.field_type, names, class_name, field.name, enums)
+        comment = _field_comment(field.field_type)
+        if field.optional:
+            lines.append(f"    {field.name}: NotRequired[{type_str} | None]{comment}")
+        else:
+            lines.append(f"    {field.name}: {type_str}{comment}")
+
+    return "\n".join(lines)
+
+
 def _render_constructor(
     fn_name: str,
     class_name: str,
@@ -363,11 +410,18 @@ def generate_types_file(
     names: NameRegistry,
     *,
     enums: dict[str, list[str]] | None = None,
+    return_type: str = "pydantic",
 ) -> str:
     """Generate the full _types.py file content. Pure function.
 
     Output is grouped by entity: each table's models + constructor appear together,
-    then each function's arg models + constructor.
+    then each function's arg models + constructor and (when ``returns:`` is
+    declared) return models / TypedDicts.
+
+    Args:
+        return_type: ``"pydantic"`` (default) emits Pydantic models for return
+            shapes; ``"typeddict"`` emits ``TypedDict`` classes; ``"any"`` omits
+            them entirely (callers always see ``Any``).
     """
     if enums is None:
         enums = _collect_str_enums(export, names)
@@ -404,7 +458,7 @@ def generate_types_file(
     # Single walk: collect per-entity object groups AND scan imports.
     seen: set[int] = set()
     table_groups: list[tuple[TableSchema, list[ConvexObject]]] = []
-    fn_groups: list[tuple[FunctionSchema, list[ConvexObject]]] = []
+    fn_groups: list[tuple[FunctionSchema, list[ConvexObject], list[ConvexObject]]] = []
 
     for table in export.tables:
         objs = _collect_objects_for_root(table.document_type, seen)
@@ -413,12 +467,22 @@ def generate_types_file(
             for f in obj.fields:
                 _check_imports(f.field_type)
 
+    emit_returns = return_type != "any"
     for fn in export.functions:
-        objs = _collect_objects_for_root(fn.args, seen)
-        fn_groups.append((fn, objs))
-        for obj in objs:
+        arg_objs = _collect_objects_for_root(fn.args, seen)
+        ret_objs: list[ConvexObject] = []
+        if emit_returns and fn.returns is not None:
+            ret_objs = _collect_objects_for_root(fn.returns, seen)
+        fn_groups.append((fn, arg_objs, ret_objs))
+        for obj in arg_objs:
             for f in obj.fields:
                 _check_imports(f.field_type)
+        for obj in ret_objs:
+            for f in obj.fields:
+                _check_imports(f.field_type)
+
+    has_returns_objects = any(ret for _, _, ret in fn_groups)
+    use_typeddict = return_type == "typeddict" and has_returns_objects
 
     # Build output
     sections: list[str] = []
@@ -435,6 +499,9 @@ def generate_types_file(
         typing_imports.append("Any")
     if needs_literal:
         typing_imports.append("Literal")
+    if use_typeddict:
+        typing_imports.append("NotRequired")
+        typing_imports.append("TypedDict")
 
     if typing_imports:
         sections.append(f"from typing import {', '.join(sorted(typing_imports))}")
@@ -482,8 +549,8 @@ def generate_types_file(
                 )
                 sections.append("")
 
-    # Per-function groups: nested arg models + arg model + constructor
-    for fn, fn_objects in fn_groups:
+    # Per-function groups: nested arg models + arg model + constructor + (optional) return classes
+    for fn, fn_objects, ret_objects in fn_groups:
         fn_names = names.function_names(fn)
         sections.append("")
         sections.append(f"# --- Function: {fn.module}:{fn.name} ({fn.fn_type}) ---")
@@ -502,5 +569,11 @@ def generate_types_file(
             )
         )
         sections.append("")
+        for obj in ret_objects:
+            if return_type == "typeddict":
+                sections.append(_render_typeddict(obj, names, enums))
+            else:
+                sections.append(_render_model(obj, names, enums))
+            sections.append("")
 
     return "\n".join(sections).rstrip() + "\n"

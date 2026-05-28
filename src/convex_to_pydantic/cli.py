@@ -114,6 +114,7 @@ def _run_pipeline(
     do_format: bool = True,
     output_mode: str = "single",
     client_style: str = "async",
+    return_type: str = "pydantic",
 ) -> PipelineResult:
     """Run the full extraction → codegen pipeline."""
     t_start = time.monotonic()
@@ -163,11 +164,17 @@ def _run_pipeline(
 
     # Pure transform
     t_transform = time.monotonic()
-    generated = transform(blob, output_mode=output_mode, client_style=client_style)
+    generated = transform(
+        blob,
+        output_mode=output_mode,
+        client_style=client_style,
+        return_type=return_type,
+    )
     transform_ms = _elapsed_ms(t_transform)
 
     # Write files
     _write_generated(output_dir, generated, do_format=do_format)
+    _warn_missing_returns(generated.missing_returns)
 
     # Update hashes
     if source_digest is None and convex_dir:
@@ -205,6 +212,18 @@ def _elapsed_ms(start: float) -> float:
     return (time.monotonic() - start) * 1000
 
 
+def _warn_missing_returns(missing: tuple[str, ...]) -> None:
+    """Print one grouped stderr warning listing functions with no ``returns:``."""
+    if not missing:
+        return
+    paths = ", ".join(missing)
+    typer.echo(
+        f"warning: {len(missing)} Convex function(s) lack `returns:` declarations "
+        f"and will be typed as Any ({paths}). Add `returns:` validators to type them.",
+        err=True,
+    )
+
+
 def _run_check(
     convex_dir: Path | None,
     input_json: Path | None,
@@ -212,6 +231,7 @@ def _run_check(
     *,
     do_format: bool = True,
     client_style: str = "async",
+    return_type: str = "pydantic",
 ) -> None:
     """Check if generated files are up-to-date. Exits 0 if matching, 1 if stale."""
     # Extract
@@ -223,7 +243,7 @@ def _run_check(
         raise typer.BadParameter("Either --convex-dir or --input must be provided.")
 
     # Transform
-    generated = transform(blob, client_style=client_style)
+    generated = transform(blob, client_style=client_style, return_type=return_type)
 
     # Format the generated content to match what _write_generated would produce
     expected_types = (
@@ -325,6 +345,15 @@ def generate(
             "'sync' emits plain `def` for callers that can't use async.",
         ),
     ] = None,
+    return_type: Annotated[
+        Optional[str],
+        typer.Option(
+            "--return-type",
+            help="Typing for Convex responses: 'pydantic' (default) validates with "
+            "Pydantic models, 'typeddict' emits TypedDicts with cast(), 'any' keeps "
+            "the legacy `-> Any` behavior.",
+        ),
+    ] = None,
 ) -> None:
     """Generate Pydantic models from Convex schema."""
     cfg = load_config()
@@ -340,6 +369,13 @@ def generate(
             f"--client-style must be 'async' or 'sync', got {resolved_client_style!r}."
         )
 
+    resolved_return_type = return_type or cfg.return_type
+    if resolved_return_type not in ("pydantic", "typeddict", "any"):
+        raise typer.BadParameter(
+            f"--return-type must be 'pydantic', 'typeddict', or 'any', got "
+            f"{resolved_return_type!r}."
+        )
+
     if output_dir is None:
         raise typer.BadParameter("--output-dir is required (or set output_dir in pyproject.toml).")
 
@@ -350,6 +386,7 @@ def generate(
             output_dir,
             do_format=do_format,
             client_style=resolved_client_style,
+            return_type=resolved_return_type,
         )
         return
 
@@ -361,6 +398,7 @@ def generate(
         do_format=do_format,
         output_mode=output_mode,
         client_style=resolved_client_style,
+        return_type=resolved_return_type,
     )
     if result.regenerated:
         typer.echo(f"Generated {output_dir / '_types.py'}")
@@ -410,6 +448,7 @@ def watch(
         force=True,
         output_mode=cfg.output_mode,
         client_style=cfg.client_style,
+        return_type=cfg.return_type,
     )
     _print_result(result, output_dir)
     typer.echo("Ready. Waiting for changes... (Ctrl-C to stop)\n")
@@ -424,6 +463,7 @@ def watch(
                 output_dir,
                 output_mode=cfg.output_mode,
                 client_style=cfg.client_style,
+                return_type=cfg.return_type,
             )
             _print_result(result, output_dir)
         except (OSError, json.JSONDecodeError, ValueError, RuntimeError) as e:

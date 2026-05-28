@@ -387,6 +387,204 @@ class TestLiteralInFnArgs:
         typing.get_type_hints(fn, localns={"ConvexClient": object})
 
 
+class TestTypedReturnsPydantic:
+    """Pydantic mode: typed return annotations + Model.model_validate / TypeAdapter wrapping."""
+
+    def _generate(self, return_type: str) -> tuple[str, str]:
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type=return_type)
+        return result.types_content, result.client_content
+
+    def test_object_return_annotation(self):
+        _, client = self._generate("pydantic")
+        assert "async def posts_get_query_call(" in client
+        assert ") -> PostsGetQueryReturns:" in client
+
+    def test_object_return_model_validate(self):
+        _, client = self._generate("pydantic")
+        assert 'PostsGetQueryReturns.model_validate(await client.query("posts:get"' in client
+
+    def test_scalar_return_uses_type_adapter(self):
+        _, client = self._generate("pydantic")
+        assert ") -> float:" in client
+        assert "TypeAdapter(float).validate_python(" in client
+
+    def test_list_of_primitive_return(self):
+        _, client = self._generate("pydantic")
+        assert ") -> list[str]:" in client
+        assert "TypeAdapter(list[str]).validate_python(" in client
+
+    def test_list_of_object_return(self):
+        _, client = self._generate("pydantic")
+        assert ") -> list[PostsListQueryReturnsItem]:" in client
+        assert "TypeAdapter(list[PostsListQueryReturnsItem]).validate_python(" in client
+
+    def test_undeclared_returns_falls_back_to_any(self):
+        _, client = self._generate("pydantic")
+        # `posts:create` has no `returns:` validator — annotation is Any and
+        # the call is not wrapped.
+        idx = client.index("async def posts_create_mutation_call(")
+        snippet = client[idx : idx + 600]
+        assert ") -> Any:" in snippet
+        assert ".model_validate(" not in snippet
+        assert "TypeAdapter(" not in snippet
+
+    def test_return_model_emitted_in_types(self):
+        types, _ = self._generate("pydantic")
+        assert "class PostsGetQueryReturns(BaseModel):" in types
+        assert "class PostsListQueryReturnsItem(BaseModel):" in types
+
+    def test_return_model_has_forbid_extra(self):
+        types, _ = self._generate("pydantic")
+        # Both args and returns share the same strict config.
+        get_returns_idx = types.index("class PostsGetQueryReturns(")
+        snippet = types[get_returns_idx : get_returns_idx + 300]
+        assert 'extra="forbid"' in snippet
+
+    def test_no_constructor_for_returns(self):
+        types, _ = self._generate("pydantic")
+        # Returns are received, not constructed — no helper function should
+        # be emitted with the *_returns naming.
+        assert "def posts_get_query_returns(" not in types
+        assert "def posts_list_query_returns(" not in types
+
+    def test_type_adapter_imported_only_when_needed(self):
+        _, client = self._generate("pydantic")
+        assert "from pydantic import TypeAdapter" in client
+
+    def test_return_classes_in_type_imports(self):
+        _, client = self._generate("pydantic")
+        import_line = next(ln for ln in client.splitlines() if ln.startswith("from ._types"))
+        assert "PostsGetQueryReturns" in import_line
+        assert "PostsListQueryReturnsItem" in import_line
+
+    def test_compiles(self):
+        types, client = self._generate("pydantic")
+        compile(types, "_types.py", "exec")
+        compile(client, "_client.py", "exec")
+
+
+class TestTypedReturnsTypedDict:
+    """TypedDict mode: TypedDict definitions + cast() at call sites."""
+
+    def _generate(self) -> tuple[str, str]:
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="typeddict")
+        return result.types_content, result.client_content
+
+    def test_emits_typeddict_classes(self):
+        types, _ = self._generate()
+        assert "class PostsGetQueryReturns(TypedDict):" in types
+        assert "class PostsListQueryReturnsItem(TypedDict):" in types
+
+    def test_typeddict_imports(self):
+        types, _ = self._generate()
+        assert "TypedDict" in types
+        assert "NotRequired" in types
+
+    def test_optional_field_uses_not_required(self):
+        types, _ = self._generate()
+        idx = types.index("class PostsGetQueryReturns(TypedDict):")
+        snippet = types[idx : idx + 400]
+        assert "publishedAt: NotRequired[float | None]" in snippet
+
+    def test_typeddict_keys_not_renamed(self):
+        # TypedDict can't rename keys, so `id` stays `id` (matching the JSON wire),
+        # unlike the Pydantic model which would alias to `id_`.
+        types, _ = self._generate()
+        idx = types.index("class PostsGetQueryReturns(TypedDict):")
+        snippet = types[idx : idx + 400]
+        assert "id: str" in snippet
+        assert "id_:" not in snippet
+
+    def test_client_uses_cast(self):
+        _, client = self._generate()
+        assert "from typing import" in client
+        assert "cast" in client
+        assert "cast(PostsGetQueryReturns, await client.query(" in client
+        assert "cast(list[PostsListQueryReturnsItem], await client.query(" in client
+
+    def test_scalar_return_uses_cast(self):
+        _, client = self._generate()
+        assert "cast(float, await client.query(" in client
+        assert "cast(list[str], await client.query(" in client
+
+    def test_undeclared_returns_falls_back_to_any(self):
+        _, client = self._generate()
+        idx = client.index("async def posts_create_mutation_call(")
+        snippet = client[idx : idx + 600]
+        assert ") -> Any:" in snippet
+        assert "cast(" not in snippet
+
+    def test_no_type_adapter_import(self):
+        _, client = self._generate()
+        assert "TypeAdapter" not in client
+
+    def test_compiles(self):
+        types, client = self._generate()
+        compile(types, "_types.py", "exec")
+        compile(client, "_client.py", "exec")
+
+
+class TestTypedReturnsAny:
+    """`any` mode preserves today's `-> Any` behavior — no return classes generated."""
+
+    def _generate(self) -> tuple[str, str]:
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="any")
+        return result.types_content, result.client_content
+
+    def test_all_calls_return_any(self):
+        _, client = self._generate()
+        # Five functions, all annotated `-> Any`.
+        assert client.count(") -> Any:") == 5
+
+    def test_no_return_classes_in_types(self):
+        types, _ = self._generate()
+        assert "PostsGetQueryReturns" not in types
+        assert "PostsListQueryReturnsItem" not in types
+
+    def test_no_typeadapter_or_cast(self):
+        _, client = self._generate()
+        assert "TypeAdapter" not in client
+        assert "cast(" not in client
+
+
+class TestMissingReturnsWarning:
+    """`missing_returns` lists every function lacking a `returns:` validator,
+    but only when `return_type` is non-`any`."""
+
+    def test_collects_missing_in_pydantic_mode(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="pydantic")
+        assert result.missing_returns == ("posts:create",)
+
+    def test_collects_missing_in_typeddict_mode(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="typeddict")
+        assert result.missing_returns == ("posts:create",)
+
+    def test_empty_in_any_mode(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="any")
+        assert result.missing_returns == ()
+
+    def test_existing_fixtures_have_no_returns(self):
+        # None of the legacy fixtures declare `returns:`, so every function
+        # surfaces in the warning under pydantic mode.
+        blob = json.loads((FIXTURES / "chat_app.json").read_text())
+        result = transform(blob, return_type="pydantic")
+        assert set(result.missing_returns) == {"messages:list", "messages:send"}
+
+
+class TestReturnTypeValidation:
+    def test_invalid_return_type_raises(self):
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="return_type"):
+            transform({"tables": [], "functions": []}, return_type="bogus")
+
+
 class TestAllFixturesValid:
     def test_all_types_compile(self):
         for fixture in FIXTURES.glob("*.json"):

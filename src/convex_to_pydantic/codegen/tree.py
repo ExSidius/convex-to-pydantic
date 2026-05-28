@@ -17,10 +17,11 @@ from .types_file import (
     _render_enum,
     _render_model,
     _render_type,
+    _render_typeddict,
     _field_comment,
     _check_imports_for_objects,
 )
-from .client_file import _METHOD_MAP
+from .client_file import _METHOD_MAP, _resolve_return, _wrap_call
 
 
 def generate_tables_file(
@@ -112,6 +113,7 @@ def generate_module_file(
     enums: dict[str, list[str]],
     *,
     client_style: str = "async",
+    return_type: str = "pydantic",
 ) -> str:
     """Generate a single module file with function arg models + constructors + client wrappers.
 
@@ -119,9 +121,17 @@ def generate_module_file(
         client_style: "async" (default) emits ``async def`` wrappers using
             ``await client.<method>(...)``; "sync" emits plain ``def``
             wrappers calling the client synchronously.
+        return_type: "pydantic" (default) wraps responses in
+            ``Model.model_validate(...)`` / ``TypeAdapter(...).validate_python``;
+            "typeddict" emits ``cast(<TypedDict>, ...)``; "any" leaves responses
+            untouched and annotates the return as ``Any``.
     """
     if client_style not in ("async", "sync"):
         raise ValueError(f"Invalid client_style {client_style!r}; expected 'async' or 'sync'.")
+    if return_type not in ("pydantic", "typeddict", "any"):
+        raise ValueError(
+            f"Invalid return_type {return_type!r}; expected 'pydantic', 'typeddict', or 'any'."
+        )
     is_async = client_style == "async"
     def_prefix = "async def " if is_async else "def "
     call_prefix = "await " if is_async else ""
@@ -133,29 +143,51 @@ def generate_module_file(
     )
     sections.append("from __future__ import annotations")
     sections.append("")
-    sections.append("from typing import Any, TYPE_CHECKING")
+
+    # Collect all objects for these functions (args + returns)
+    seen: set[int] = set()
+    fn_groups: list[tuple[FunctionSchema, list[ConvexObject], list[ConvexObject]]] = []
+    all_objects: list[ConvexObject] = []
+    emit_returns = return_type != "any"
+    for fn in functions:
+        arg_objs = _collect_objects_for_root(fn.args, seen)
+        ret_objs: list[ConvexObject] = []
+        if emit_returns and fn.returns is not None:
+            ret_objs = _collect_objects_for_root(fn.returns, seen)
+        fn_groups.append((fn, arg_objs, ret_objs))
+        all_objects.extend(arg_objs)
+        all_objects.extend(ret_objs)
+
+    # Resolve return annotations + wrap kinds for each function
+    resolved: list[tuple[FunctionSchema, str, str | None]] = []
+    for fn in functions:
+        ann, wrap = _resolve_return(fn, names, enums, return_type)
+        resolved.append((fn, ann, wrap))
+
+    needs_type_adapter = any(wrap == "type_adapter" for _, _, wrap in resolved)
+    needs_cast = any(wrap == "cast" for _, _, wrap in resolved)
+    needs_any_for_returns = any(wrap is None for _, _, wrap in resolved)
+
+    # Imports
+    needs_any, needs_literal = _check_imports_for_objects(all_objects)
+    typing_imports = ["TYPE_CHECKING"]
+    if needs_any or needs_any_for_returns:
+        typing_imports.append("Any")
+    if needs_literal:
+        typing_imports.append("Literal")
+    if needs_cast:
+        typing_imports.append("cast")
+    has_ret_objects = any(r for _, _, r in fn_groups)
+    if return_type == "typeddict" and has_ret_objects:
+        typing_imports.append("NotRequired")
+        typing_imports.append("TypedDict")
+    sections.append(f"from typing import {', '.join(sorted(typing_imports))}")
+    if needs_type_adapter:
+        sections.append("from pydantic import TypeAdapter")
     sections.append("")
     sections.append("if TYPE_CHECKING:")
     sections.append("    from convex import ConvexClient")
     sections.append("")
-
-    # Collect all objects for these functions
-    seen: set[int] = set()
-    fn_groups = []
-    all_objects = []
-    for fn in functions:
-        objs = _collect_objects_for_root(fn.args, seen)
-        fn_groups.append((fn, objs))
-        all_objects.extend(objs)
-
-    # Imports
-    needs_any, needs_literal = _check_imports_for_objects(all_objects)
-    # We already import Any above
-    typing_imports = []
-    if needs_literal:
-        typing_imports.append("Literal")
-    if typing_imports:
-        sections.append(f"from typing import {', '.join(sorted(typing_imports))}")
 
     fn_enums = {
         k: v for k, v in enums.items() if _enum_used_in_objects(k, all_objects, names, enums)
@@ -174,8 +206,8 @@ def generate_module_file(
             sections.append(_render_enum(name, values))
             sections.append("")
 
-    # Per-function: models + constructor + client wrapper
-    for fn, fn_objects in fn_groups:
+    # Per-function: arg models + constructor + return classes + client wrapper
+    for (fn, fn_objects, ret_objects), (_, return_ann, wrap_kind) in zip(fn_groups, resolved):
         fn_names = names.function_names(fn)
         method = _METHOD_MAP.get(fn.fn_type, "query")
         path = f"{fn.module}:{fn.name}"
@@ -184,12 +216,12 @@ def generate_module_file(
         sections.append(f"# --- {fn.name} ({fn.fn_type}) ---")
         sections.append("")
 
-        # Models
+        # Arg models
         for obj in fn_objects:
             sections.append(_render_model(obj, names, enums))
             sections.append("")
 
-        # Constructor
+        # Arg constructor
         sections.append(
             _render_constructor(
                 fn_names.fn_name,
@@ -201,6 +233,14 @@ def generate_module_file(
             )
         )
         sections.append("")
+
+        # Return models / TypedDicts
+        for obj in ret_objects:
+            if return_type == "typeddict":
+                sections.append(_render_typeddict(obj, names, enums))
+            else:
+                sections.append(_render_model(obj, names, enums))
+            sections.append("")
 
         # Client wrapper
         lines = [f"{def_prefix}{fn_names.fn_name}_call("]
@@ -220,16 +260,15 @@ def generate_module_file(
                     lines.append(f"    {py_name}: {type_str} = None,{comment}")
                 else:
                     lines.append(f"    {py_name}: {type_str},{comment}")
-        lines.append(") -> Any:")
+        lines.append(f") -> {return_ann}:")
         lines.append(f'    """Convex {fn.fn_type}: {path}"""')
         if fn.args.fields:
             arg_names = ", ".join(f"{to_snake(f.name)}={to_snake(f.name)}" for f in fn.args.fields)
             lines.append(f"    args = {fn_names.fn_name}({arg_names})")
         else:
             lines.append(f"    args = {fn_names.fn_name}()")
-        lines.append(
-            f'    return {call_prefix}client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
-        )
+        call_expr = f'{call_prefix}client.{method}("{path}", args.model_dump(by_alias=True, exclude_none=True))'
+        lines.append(f"    return {_wrap_call(call_expr, return_ann, wrap_kind)}")
         sections.append("\n".join(lines))
         sections.append("")
 

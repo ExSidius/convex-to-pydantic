@@ -84,6 +84,9 @@ class _Namer:
     def name_function_args(self, module: str, fn_name: str, fn_type: str) -> str:
         return self.assign(to_pascal(module) + to_pascal(fn_name) + to_pascal(fn_type) + "Args")
 
+    def name_function_returns(self, module: str, fn_name: str, fn_type: str) -> str:
+        return self.assign(to_pascal(module) + to_pascal(fn_name) + to_pascal(fn_type) + "Returns")
+
     def name_function(self, module: str, fn_name: str, fn_type: str) -> str:
         return to_snake(module) + "_" + to_snake(fn_name) + "_" + to_snake(fn_type)
 
@@ -138,5 +141,14 @@ def assign_names(export: ConvexExport) -> NameRegistry:
         registry.objects[id(fn.args)] = class_name
         for f in fn.args.fields:
             _walk_and_name_type(namer, registry, class_name, f.name, f.field_type)
+
+        if fn.returns is not None:
+            returns_label = namer.name_function_returns(fn.module, fn.name, fn.fn_type)
+            if isinstance(fn.returns, ConvexObject):
+                registry.objects[id(fn.returns)] = returns_label
+                for f in fn.returns.fields:
+                    _walk_and_name_type(namer, registry, returns_label, f.name, f.field_type)
+            else:
+                _walk_and_name_type(namer, registry, returns_label, "", fn.returns)
 
     return registry
