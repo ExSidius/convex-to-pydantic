@@ -111,6 +111,68 @@ async def messages_send_mutation_call(
     return await client.mutation("messages:send", args.model_dump(by_alias=True, exclude_none=True))
 ```
 
+### Typed return values
+
+When a Convex function declares a `returns:` validator, the generated wrapper
+returns a real Python type (not `Any`). The flavor is controlled per project via
+`--return-type` (or `return_type = "..."` in `pyproject.toml`):
+
+| Mode | Annotation | Runtime |
+|------|------------|---------|
+| `pydantic` (default) | Generated `BaseModel` / scalar | `Model.model_validate(result)` (or `TypeAdapter` for non-object shapes) — strict, `extra="forbid"` |
+| `typeddict` | Generated `TypedDict` / scalar | `cast(<T>, result)` — zero runtime cost |
+| `any` | `Any` (legacy behavior) | Untouched |
+
+Given a Convex query
+
+```ts
+export const get = query({
+  args: { id: v.id("posts") },
+  returns: v.object({ id: v.id("posts"), title: v.string(), body: v.string() }),
+  handler: async (ctx, { id }) => { /* ... */ },
+});
+```
+
+**Pydantic mode** generates a validated wrapper:
+
+```python
+class PostsGetQueryReturns(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    id_: str = Field(alias='id')  # Id[posts]
+    title: str
+    body: str
+
+async def posts_get_query_call(client, *, id_: str) -> PostsGetQueryReturns:
+    args = posts_get_query(id_=id_)
+    return PostsGetQueryReturns.model_validate(
+        await client.query("posts:get", args.model_dump(by_alias=True, exclude_none=True))
+    )
+```
+
+**TypedDict mode** emits structural types without runtime overhead:
+
+```python
+class PostsGetQueryReturns(TypedDict):
+    id: str  # Id[posts]
+    title: str
+    body: str
+
+async def posts_get_query_call(client, *, id_: str) -> PostsGetQueryReturns:
+    args = posts_get_query(id_=id_)
+    return cast(PostsGetQueryReturns, await client.query("posts:get", args.model_dump(by_alias=True, exclude_none=True)))
+```
+
+> **TypedDict caveat:** TypedDicts can't alias keys, so the JSON wire-format
+> names appear verbatim (e.g. `id` and `_id` instead of the snake-cased `id_` /
+> `creation_time` you get with Pydantic). Field names that collide with Python
+> keywords aren't supported in `typeddict` mode — switch to `pydantic` if your
+> return shapes use them.
+
+**Missing `returns:` declarations.** When a function doesn't declare `returns:`,
+the wrapper falls back to `-> Any` regardless of mode. In `pydantic` /
+`typeddict` modes, codegen prints a single grouped stderr warning listing every
+such function so you know where to add declarations.
+
 ### Sync client wrappers
 
 Not every caller can use `async`/`await` (Flask handlers, scripts, notebooks, sync
@@ -148,6 +210,7 @@ convex-to-pydantic generate [OPTIONS]
 | `--output-dir PATH` | **(required)** Directory to write `_types.py` and `_client.py`. |
 | `--force / -f` | Regenerate even if the schema hasn't changed. |
 | `--client-style [async\|sync]` | Flavor of client wrappers to emit. `async` (default) emits `async def` + `await`; `sync` emits plain `def` for callers that can't use async. |
+| `--return-type [pydantic\|typeddict\|any]` | How Convex responses are typed. `pydantic` (default) validates with Pydantic models, `typeddict` emits TypedDicts with `cast()`, `any` keeps the legacy `-> Any` behavior. |
 
 Either `--convex-dir` or `--input` must be provided. Use `--input` for CI workflows or when you've pre-exported the schema JSON.
 
@@ -159,6 +222,7 @@ convex_dir = "./convex"
 output_dir = "./src/myapp/convex_generated"
 output_mode = "single"        # or "tree"
 client_style = "async"        # or "sync"
+return_type = "pydantic"      # or "typeddict" or "any"
 format = true
 ```
 
@@ -321,6 +385,13 @@ generate(
     convex_dir=Path("./convex"),
     output_dir=Path("./src/myapp/convex_generated"),
     client_style="sync",
+)
+
+# Emit TypedDicts (zero runtime cost) instead of validated Pydantic models
+generate(
+    convex_dir=Path("./convex"),
+    output_dir=Path("./src/myapp/convex_generated"),
+    return_type="typeddict",
 )
 ```
 

@@ -1,0 +1,82 @@
+{
+  "tables": [
+    {
+      "tableName": "posts",
+      "indexes": [],
+      "documentType": {
+        "type": "object",
+        "value": {
+          "title": { "fieldType": { "type": "string" }, "optional": false },
+          "body": { "fieldType": { "type": "string" }, "optional": false }
+        }
+      }
+    }
+  ],
+  "functions": [
+    {
+      "module": "posts",
+      "name": "count",
+      "type": "query",
+      "args": { "type": "object", "value": {} },
+      "returns": { "type": "number" }
+    },
+    {
+      "module": "posts",
+      "name": "titles",
+      "type": "query",
+      "args": { "type": "object", "value": {} },
+      "returns": {
+        "type": "array",
+        "value": { "type": "string" }
+      }
+    },
+    {
+      "module": "posts",
+      "name": "get",
+      "type": "query",
+      "args": {
+        "type": "object",
+        "value": {
+          "id": { "fieldType": { "type": "id", "tableName": "posts" }, "optional": false }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "value": {
+          "id": { "fieldType": { "type": "id", "tableName": "posts" }, "optional": false },
+          "title": { "fieldType": { "type": "string" }, "optional": false },
+          "body": { "fieldType": { "type": "string" }, "optional": false },
+          "publishedAt": { "fieldType": { "type": "number" }, "optional": true }
+        }
+      }
+    },
+    {
+      "module": "posts",
+      "name": "list",
+      "type": "query",
+      "args": { "type": "object", "value": {} },
+      "returns": {
+        "type": "array",
+        "value": {
+          "type": "object",
+          "value": {
+            "id": { "fieldType": { "type": "id", "tableName": "posts" }, "optional": false },
+            "title": { "fieldType": { "type": "string" }, "optional": false }
+          }
+        }
+      }
+    },
+    {
+      "module": "posts",
+      "name": "create",
+      "type": "mutation",
+      "args": {
+        "type": "object",
+        "value": {
+          "title": { "fieldType": { "type": "string" }, "optional": false },
+          "body": { "fieldType": { "type": "string" }, "optional": false }
+        }
+      }
+    }
+  ]
+}

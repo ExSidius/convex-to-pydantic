@@ -92,6 +92,13 @@ class TestNamer:
             n.name_function_args("calendars", "create", "mutation") == "CalendarsCreateMutationArgs"
         )
 
+    def test_name_function_returns(self):
+        n = _Namer()
+        assert (
+            n.name_function_returns("calendars", "create", "mutation")
+            == "CalendarsCreateMutationReturns"
+        )
+
     def test_name_function_args_nested_module(self):
         n = _Namer()
         assert n.name_function_args("chat/messages", "list", "query") == "ChatMessagesListQueryArgs"
@@ -185,3 +192,32 @@ class TestAssignNames:
         registry = assign_names(export)
         all_names = list(registry.objects.values())
         assert len(all_names) == len(set(all_names))
+
+    def test_returns_object_gets_returns_suffix(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        export = parse_export(blob)
+        registry = assign_names(export)
+        get_fn = next(fn for fn in export.functions if fn.name == "get")
+        assert isinstance(get_fn.returns, ConvexObject)
+        assert registry.object_name(get_fn.returns) == "PostsGetQueryReturns"
+
+    def test_returns_array_inner_object_named(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        export = parse_export(blob)
+        registry = assign_names(export)
+        list_fn = next(fn for fn in export.functions if fn.name == "list")
+        # returns: v.array(v.object(...)) — the inner object gets a *Item name
+        from convex_to_pydantic.types import ConvexArray
+
+        assert isinstance(list_fn.returns, ConvexArray)
+        assert isinstance(list_fn.returns.element, ConvexObject)
+        assert registry.object_name(list_fn.returns.element) == "PostsListQueryReturnsItem"
+
+    def test_no_class_for_primitive_returns(self):
+        """Functions returning scalars don't get an extra object registered."""
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        export = parse_export(blob)
+        registry = assign_names(export)
+        count_fn = next(fn for fn in export.functions if fn.name == "count")
+        # The returns is a primitive — no object registered for it.
+        assert id(count_fn.returns) not in registry.objects

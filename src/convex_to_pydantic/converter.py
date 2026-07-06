@@ -112,11 +112,15 @@ def parse_function(fn: dict) -> FunctionSchema:
     else:
         args = ConvexObject(fields=())
 
+    returns_node = fn.get("returns")
+    returns = parse_convex_type(returns_node) if returns_node else None
+
     return FunctionSchema(
         module=fn["module"],
         name=fn["name"],
         fn_type=fn["type"],
         args=args,
+        returns=returns,
     )
 
 

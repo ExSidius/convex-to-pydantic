@@ -110,3 +110,43 @@ class TestClientStyle:
         assert "async def" not in module
         assert "await " not in module
         assert "return client.mutation(" in module
+
+
+class TestReturnType:
+    """`return_type` is threaded through the pipeline and surfaces warnings."""
+
+    def test_default_is_pydantic(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob)
+        # Pydantic mode wraps object returns in `.model_validate(...)`.
+        assert "model_validate(" in result.client_content
+
+    def test_invalid_return_type_raises(self):
+        with pytest.raises(ValueError, match="return_type"):
+            transform({"tables": [], "functions": []}, return_type="bogus")
+
+    def test_missing_returns_populated_in_pydantic_mode(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="pydantic")
+        assert result.missing_returns == ("posts:create",)
+
+    def test_missing_returns_empty_in_any_mode(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, return_type="any")
+        assert result.missing_returns == ()
+
+    def test_missing_returns_in_tree_mode(self):
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, output_mode="tree", return_type="pydantic")
+        assert result.missing_returns == ("posts:create",)
+
+    def test_any_mode_matches_legacy_output(self):
+        """`return_type='any'` keeps the original `-> Any` behavior for fixtures
+        that don't declare `returns:` — important backward-compatibility guard."""
+        for name in ("chat_app.json", "auth_app.json", "ai_app.json"):
+            blob = json.loads((FIXTURES / name).read_text())
+            any_mode = transform(blob, return_type="any")
+            pydantic_mode = transform(blob, return_type="pydantic")
+            # No fixture declares `returns:`, so both modes fall back to Any
+            # for every wrapper — identical generated client.
+            assert any_mode.client_content == pydantic_mode.client_content, name
