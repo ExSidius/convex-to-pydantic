@@ -116,6 +116,20 @@ class TestParseConvexType:
         assert isinstance(result.keys, ConvexString)
         assert isinstance(result.values, ConvexAny)
 
+    def test_record_with_field_def_wrapped_values(self):
+        # Convex's v.export() serializes record values as a field-def wrapper
+        # ({"fieldType": <type>, "optional": bool}), same shape as object fields.
+        result = parse_convex_type(
+            {
+                "type": "record",
+                "keys": {"type": "string"},
+                "values": {"fieldType": {"type": "string"}, "optional": False},
+            }
+        )
+        assert isinstance(result, ConvexRecord)
+        assert isinstance(result.keys, ConvexString)
+        assert isinstance(result.values, ConvexString)
+
     def test_union(self):
         result = parse_convex_type(
             {
