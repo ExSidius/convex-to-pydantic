@@ -127,6 +127,7 @@ class FunctionSchema(BaseModel):
     name: str
     fn_type: str
     args: ConvexObject
+    returns: ConvexType | None = None
 
 
 class ConvexExport(BaseModel):

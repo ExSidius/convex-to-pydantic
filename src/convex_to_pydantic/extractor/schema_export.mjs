@@ -309,6 +309,46 @@ function extractArgs(ref) {
   return { type: "object", value: {} };
 }
 
+/**
+ * Extract returns schema from a Convex function reference, mirroring
+ * `extractArgs`. Returns `null` when the function does not declare a
+ * `returns:` validator — we want the downstream codegen to distinguish
+ * "undeclared" from "declared as v.any()" so it can warn about the former.
+ */
+function extractReturns(ref) {
+  if (typeof ref.exportReturns === "function") {
+    try {
+      const exported = ref.exportReturns();
+      if (exported === undefined || exported === null) return null;
+      if (typeof exported === "string") {
+        // Convex's exportReturns() returns the literal string "null" when no
+        // returns validator was declared — collapse that to a real null.
+        if (exported === "null") return null;
+        return JSON.parse(exported);
+      }
+      if (typeof exported === "object") return exported;
+    } catch {
+      // fall through
+    }
+  }
+  const v = ref._returnsValidator ?? ref.returnsValidator ?? null;
+  if (v) {
+    if (typeof v.json === "function") return v.json();
+    if (typeof v.json === "object") return v.json;
+    if (typeof v.export === "function") {
+      try {
+        const exp = v.export();
+        if (exp === undefined || exp === null) return null;
+        return typeof exp === "string" ? JSON.parse(exp) : exp;
+      } catch {
+        /* fall through */
+      }
+    }
+    if (v.kind || v.type) return validatorToJson(v);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Validator → JSON (used only by the schema fallback when .export() is absent)
 // ---------------------------------------------------------------------------
@@ -479,12 +519,25 @@ async function discoverFunctions(dir) {
         );
         extractedArgs = { type: "object", value: {} };
       }
-      results.push({
+      let extractedReturns = null;
+      try {
+        extractedReturns = extractReturns(value);
+      } catch (err) {
+        console.error(
+          `[convex-to-pydantic] Failed to extract returns for ${modulePath}:${exportName}: ${err.message}`
+        );
+        extractedReturns = null;
+      }
+      const fnEntry = {
         module: modulePath,
         name: exportName,
         type,
         args: extractedArgs,
-      });
+      };
+      if (extractedReturns !== null) {
+        fnEntry.returns = extractedReturns;
+      }
+      results.push(fnEntry);
     }
   }
   return results;

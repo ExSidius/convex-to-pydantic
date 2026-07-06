@@ -116,6 +116,20 @@ class TestParseConvexType:
         assert isinstance(result.keys, ConvexString)
         assert isinstance(result.values, ConvexAny)
 
+    def test_record_with_field_def_wrapped_values(self):
+        # Convex's v.export() serializes record values as a field-def wrapper
+        # ({"fieldType": <type>, "optional": bool}), same shape as object fields.
+        result = parse_convex_type(
+            {
+                "type": "record",
+                "keys": {"type": "string"},
+                "values": {"fieldType": {"type": "string"}, "optional": False},
+            }
+        )
+        assert isinstance(result, ConvexRecord)
+        assert isinstance(result.keys, ConvexString)
+        assert isinstance(result.values, ConvexString)
+
     def test_union(self):
         result = parse_convex_type(
             {
@@ -237,6 +251,71 @@ class TestParseFunction:
         fn = {"module": "m", "name": "n", "type": "query"}
         result = parse_function(fn)
         assert len(result.args.fields) == 0
+
+    def test_no_returns_key_means_none(self):
+        fn = {
+            "module": "m",
+            "name": "n",
+            "type": "query",
+            "args": {"type": "object", "value": {}},
+        }
+        result = parse_function(fn)
+        assert result.returns is None
+
+    def test_returns_null_means_none(self):
+        fn = {
+            "module": "m",
+            "name": "n",
+            "type": "query",
+            "args": {"type": "object", "value": {}},
+            "returns": None,
+        }
+        result = parse_function(fn)
+        assert result.returns is None
+
+    def test_returns_primitive(self):
+        fn = {
+            "module": "m",
+            "name": "n",
+            "type": "query",
+            "args": {"type": "object", "value": {}},
+            "returns": {"type": "string"},
+        }
+        result = parse_function(fn)
+        assert isinstance(result.returns, ConvexString)
+
+    def test_returns_object(self):
+        fn = {
+            "module": "m",
+            "name": "n",
+            "type": "query",
+            "args": {"type": "object", "value": {}},
+            "returns": {
+                "type": "object",
+                "value": {"foo": {"fieldType": {"type": "string"}, "optional": False}},
+            },
+        }
+        result = parse_function(fn)
+        assert isinstance(result.returns, ConvexObject)
+        assert result.returns.fields[0].name == "foo"
+
+    def test_returns_array_of_object(self):
+        fn = {
+            "module": "m",
+            "name": "n",
+            "type": "query",
+            "args": {"type": "object", "value": {}},
+            "returns": {
+                "type": "array",
+                "value": {
+                    "type": "object",
+                    "value": {"id": {"fieldType": {"type": "string"}, "optional": False}},
+                },
+            },
+        }
+        result = parse_function(fn)
+        assert isinstance(result.returns, ConvexArray)
+        assert isinstance(result.returns.element, ConvexObject)
 
 
 # ---------------------------------------------------------------------------

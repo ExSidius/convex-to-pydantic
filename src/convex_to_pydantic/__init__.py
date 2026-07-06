@@ -10,7 +10,13 @@ from .pipeline import GeneratedFiles, transform
 __all__ = ["generate", "generate_from_json", "transform", "GeneratedFiles"]
 
 
-def generate(convex_dir: Path, output_dir: Path, *, client_style: str = "async") -> None:
+def generate(
+    convex_dir: Path,
+    output_dir: Path,
+    *,
+    client_style: str = "async",
+    return_type: str = "pydantic",
+) -> None:
     """Extract Convex schema and generate typed Python files.
 
     Args:
@@ -18,13 +24,22 @@ def generate(convex_dir: Path, output_dir: Path, *, client_style: str = "async")
         output_dir: Directory to write _types.py and _client.py.
         client_style: "async" (default) emits ``async def`` wrappers; "sync"
             emits plain ``def`` wrappers for callers that can't use async.
+        return_type: "pydantic" (default) validates Convex responses with
+            generated Pydantic models; "typeddict" emits TypedDicts with
+            ``cast(...)``; "any" keeps responses untyped as ``Any``.
     """
     blob = extract(convex_dir)
-    generated = transform(blob, client_style=client_style)
+    generated = transform(blob, client_style=client_style, return_type=return_type)
     _write(output_dir, generated)
 
 
-def generate_from_json(input_json: Path, output_dir: Path, *, client_style: str = "async") -> None:
+def generate_from_json(
+    input_json: Path,
+    output_dir: Path,
+    *,
+    client_style: str = "async",
+    return_type: str = "pydantic",
+) -> None:
     """Generate typed Python files from a pre-exported JSON file.
 
     Args:
@@ -32,9 +47,12 @@ def generate_from_json(input_json: Path, output_dir: Path, *, client_style: str 
         output_dir: Directory to write _types.py and _client.py.
         client_style: "async" (default) emits ``async def`` wrappers; "sync"
             emits plain ``def`` wrappers for callers that can't use async.
+        return_type: "pydantic" (default) validates Convex responses with
+            generated Pydantic models; "typeddict" emits TypedDicts with
+            ``cast(...)``; "any" keeps responses untyped as ``Any``.
     """
     blob = extract_from_json(input_json)
-    generated = transform(blob, client_style=client_style)
+    generated = transform(blob, client_style=client_style, return_type=return_type)
     _write(output_dir, generated)
 
 

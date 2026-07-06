@@ -133,3 +133,50 @@ class TestTreeSyncClient:
             files = _tree_sync(fixture.name)
             for path, content in files.items():
                 compile(content, f"{fixture.stem}/{path}", "exec")
+
+
+class TestTreeTypedReturns:
+    """Tree mode honors `return_type` per-module: same wrappers, validation,
+    and TypedDict / Pydantic class emission as single mode."""
+
+    def _tree(self, return_type: str) -> dict[str, str]:
+        blob = json.loads((FIXTURES / "typed_returns.json").read_text())
+        result = transform(blob, output_mode="tree", return_type=return_type)
+        return result.tree_files
+
+    def test_pydantic_typed_returns_in_module(self):
+        files = self._tree("pydantic")
+        module = files["posts.py"]
+        assert ") -> PostsGetQueryReturns:" in module
+        assert "PostsGetQueryReturns.model_validate(" in module
+        assert "class PostsGetQueryReturns(BaseModel):" in module
+
+    def test_pydantic_scalar_return_uses_type_adapter(self):
+        files = self._tree("pydantic")
+        module = files["posts.py"]
+        assert "from pydantic import TypeAdapter" in module
+        assert "TypeAdapter(float).validate_python(" in module
+
+    def test_typeddict_emits_typeddict_class(self):
+        files = self._tree("typeddict")
+        module = files["posts.py"]
+        assert "class PostsGetQueryReturns(TypedDict):" in module
+        assert "publishedAt: NotRequired[float | None]" in module
+
+    def test_typeddict_uses_cast(self):
+        files = self._tree("typeddict")
+        module = files["posts.py"]
+        assert "cast(PostsGetQueryReturns, await client.query(" in module
+        assert "TypeAdapter" not in module
+
+    def test_any_mode_returns_any(self):
+        files = self._tree("any")
+        module = files["posts.py"]
+        assert module.count(") -> Any:") == 5
+        assert "PostsGetQueryReturns" not in module
+
+    def test_compiles_all_modes(self):
+        for mode in ("pydantic", "typeddict", "any"):
+            files = self._tree(mode)
+            for path, content in files.items():
+                compile(content, path, "exec")

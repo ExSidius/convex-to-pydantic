@@ -81,3 +81,32 @@ class TestLoadConfig:
         assert cfg.format is True
         assert cfg.output_mode == "single"
         assert cfg.client_style == "async"
+        assert cfg.return_type == "pydantic"
+
+    def test_return_type_defaults_to_pydantic(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.convex-to-pydantic]\noutput_dir = "./out"\n'
+        )
+        cfg = load_config(tmp_path)
+        assert cfg.return_type == "pydantic"
+
+    def test_return_type_typeddict(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.convex-to-pydantic]\noutput_dir = "./out"\nreturn_type = "typeddict"\n'
+        )
+        cfg = load_config(tmp_path)
+        assert cfg.return_type == "typeddict"
+
+    def test_return_type_any(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.convex-to-pydantic]\noutput_dir = "./out"\nreturn_type = "any"\n'
+        )
+        cfg = load_config(tmp_path)
+        assert cfg.return_type == "any"
+
+    def test_return_type_invalid_raises(self, tmp_path: Path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.convex-to-pydantic]\nreturn_type = "magic"\n'
+        )
+        with pytest.raises(ValueError, match="return_type"):
+            load_config(tmp_path)
