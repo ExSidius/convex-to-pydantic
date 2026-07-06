@@ -32,6 +32,19 @@ _SYSTEM_FIELDS = (
 )
 
 
+def _unwrap_field_def(node: dict) -> dict:
+    """Reduce a field-def wrapper ({"fieldType": <type>, "optional": bool}) to the bare type node.
+
+    Convex serializes record key/value types this way (unlike array/union elements),
+    mirroring the wrapper used for object fields in parse_convex_object.
+    """
+    match node:
+        case {"fieldType": field_type} if "type" not in node:
+            return field_type
+        case _:
+            return node
+
+
 def parse_convex_type(node: dict) -> ConvexType:
     """Convert a raw Convex type JSON node into the IR."""
     t = node["type"]
@@ -58,8 +71,8 @@ def parse_convex_type(node: dict) -> ConvexType:
         return ConvexArray(element=parse_convex_type(node["value"]))
     if t == "record":
         return ConvexRecord(
-            keys=parse_convex_type(node["keys"]),
-            values=parse_convex_type(node["values"]),
+            keys=parse_convex_type(_unwrap_field_def(node["keys"])),
+            values=parse_convex_type(_unwrap_field_def(node["values"])),
         )
     if t == "union":
         return ConvexUnion(variants=tuple(parse_convex_type(v) for v in node["value"]))
